@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Exit kinds.
@@ -109,6 +110,7 @@ type Service struct {
 	Enabled bool     `json:"enabled"`
 	Pin     string   `json:"pin,omitempty"` // an exit ID; "" = pick automatically
 	Domains []string `json:"domains"`
+	Custom  bool     `json:"custom,omitempty"` // added in the panel; can be deleted
 }
 
 // DefaultServices is the list a new install starts with.
@@ -132,6 +134,14 @@ func DefaultServices() []Service {
 		}},
 		{ID: "grok", Name: "Grok", Enabled: false, Domains: []string{
 			"grok.com", "x.ai",
+		}},
+		// Not AI, but asked for: YouTube's test is whether Premium (no ads)
+		// is sold from the exit's country; Instagram's is plain access.
+		{ID: "youtube", Name: "YouTube", Enabled: false, Domains: []string{
+			"youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "youtubei.googleapis.com", "youtube-nocookie.com",
+		}},
+		{ID: "instagram", Name: "Instagram", Enabled: false, Domains: []string{
+			"instagram.com", "cdninstagram.com", "ig.me", "fbcdn.net",
 		}},
 	}
 }
@@ -298,6 +308,77 @@ func (c *Config) Exit(id string) *Exit {
 		}
 	}
 	return nil
+}
+
+// Service returns the service with this ID.
+func (c *Config) Service(id string) *Service {
+	for i := range c.Services {
+		if c.Services[i].ID == id {
+			return &c.Services[i]
+		}
+	}
+	return nil
+}
+
+// NewServiceID returns an unused service ID made from name.
+func (c *Config) NewServiceID(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	base := b.String()
+	if base == "" {
+		base = "service"
+	}
+	if len(base) > 20 {
+		base = base[:20]
+	}
+	id := base
+	for n := 2; c.Service(id) != nil; n++ {
+		id = fmt.Sprintf("%s%d", base, n)
+	}
+	return id
+}
+
+// NormalizeDomains turns what people paste (URLs, "domain:x", "*.x",
+// one per line or comma-separated) into a clean list of domains.
+func NormalizeDomains(in []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, raw := range in {
+		for _, d := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '،' || unicode.IsSpace(r) }) {
+			d = strings.ToLower(strings.TrimSpace(d))
+			d = strings.TrimPrefix(d, "domain:")
+			if i := strings.Index(d, "://"); i >= 0 {
+				d = d[i+3:]
+			}
+			d, _, _ = strings.Cut(d, "/")
+			if h, _, err := net.SplitHostPort(d); err == nil {
+				d = h
+			}
+			d = strings.TrimLeft(d, "*.")
+			d = strings.TrimSuffix(d, ".")
+			if d == "" {
+				continue
+			}
+			if !strings.Contains(d, ".") || strings.ContainsAny(d, "\"'<>@ ") {
+				return nil, fmt.Errorf("دامنه‌ی «%s» درست نیست", d)
+			}
+			if !seen[d] {
+				seen[d] = true
+				out = append(out, d)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("دست‌کم یک دامنه لازم است")
+	}
+	if len(out) > 300 {
+		return nil, errors.New("حداکثر ۳۰۰ دامنه")
+	}
+	return out, nil
 }
 
 // NewExitID returns an ID not used yet, starting from base.

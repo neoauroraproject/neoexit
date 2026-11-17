@@ -34,6 +34,11 @@ function append(el, kids) {
     el.append(k instanceof Node ? k : document.createTextNode(String(k)));
   }
 }
+// replaceChildren, but skipping null/false like h() does.
+function fill(el, ...kids) {
+  el.replaceChildren();
+  append(el, kids);
+}
 // Fixed, trusted SVG markup (icons) only.
 function art(markup, cls) {
   const t = document.createElement("template");
@@ -132,7 +137,11 @@ const icon = (name) => art(ICON[name]);
 const AVATAR = {
   chatgpt: ["GP", "#e3f1ea", "#1f6a4f"], claude: ["CL", "#f6e3d6", "#8a4521"], gemini: ["GE", "#e1e8fb", "#2c4ea3"],
   copilot: ["CO", "#e6e2f6", "#4b3c95"], perplexity: ["PX", "#dff0f1", "#1f6670"], grok: ["GK", "#ececec", "#2c2c2c"],
+  youtube: ["YT", "#fbe1e1", "#a32020"], instagram: ["IG", "#f8e1ef", "#8a2463"],
 };
+const avatarOf = (sv) => AVATAR[sv.id] || [[...sv.name].slice(0, 2).join("").toUpperCase(), "#eee", "#333"];
+// What a "geo" answer means differs for YouTube: Premium isn't sold there.
+const stateWord = (svcId, st) => svcId === "youtube" && st === "geo" ? "بدون Premium" : STATE_WORD[st];
 
 /* ============================ state ============================ */
 
@@ -269,6 +278,8 @@ function exitRow() {
       class: "card exit-card" + (x.enabled ? "" : " off"), role: "listitem", tabindex: "0",
       "aria-pressed": ui.selected === x.id ? "true" : "false",
       onclick: (ev) => { if (!ev.target.closest(".more")) selectExit(x.id); },
+      ondblclick: (ev) => { if (!ev.target.closest(".more")) openExit(x); },
+      title: "دو بار بزنید تا ویرایش شود",
       onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectExit(x.id); } },
     },
       thumb(x.kind),
@@ -497,31 +508,78 @@ function servicesCard() {
     const live = liveSvc(sv.id);
     const ex = exitOf(live.exit);
     const lx = live.exit ? liveExit(live.exit) : null;
-    const [ini, bg, fg] = AVATAR[sv.id] || [sv.name.slice(0, 2).toUpperCase(), "#eee", "#333"];
+    const [ini, bg, fg] = avatarOf(sv);
     const st = sv.enabled ? live.state || "error" : "";
     const sub = !sv.enabled ? "خاموش" : !ex ? "خروجی ندارد" : (sv.pin ? "ثابت روی " : "از ") + ex.name;
     list.append(h("li", {}, h("button", {
       class: "svc-row" + (sv.enabled ? "" : " off"), type: "button", onclick: () => openService(sv.id),
-      "aria-label": sv.name + "، " + (STATE_WORD[st] || "خاموش") + "، " + sub,
+      "aria-label": sv.name + "، " + (stateWord(sv.id, st) || "خاموش") + "، " + sub,
     },
       h("span", { class: "svc-icon", "aria-hidden": "true" }, icon(sv.pin ? "pin" : "spark")),
       h("span", { class: "svc-avatar", style: `background:${bg};color:${fg}`, "aria-hidden": "true" }, ini),
       h("span", {}, h("b", {}, ltr(sv.name)), h("small", {}, sub)),
       h("span", { class: "svc-end" },
         lx && lx.trace && lx.trace.country ? h("span", { class: "cc" }, lx.trace.country) : h("span"),
-        sv.enabled ? h("span", {}, h("i", { class: "dot " + st, style: "margin-inline-end:4px" }), STATE_WORD[st] || "") : null))));
+        sv.enabled ? h("span", {}, h("i", { class: "dot " + st, style: "margin-inline-end:4px" }), stateWord(sv.id, st) || "") : null))));
   }
+  list.append(h("li", {}, h("button", { class: "svc-add", type: "button", onclick: () => openService(null) },
+    h("span", { class: "svc-icon", "aria-hidden": "true" }, icon("plus")), h("span", {}, "سرویس تازه، با دامنه‌هایش"))));
   return h("section", { class: "dark-card", "aria-labelledby": "svc-title" },
     h("div", { class: "card-head" }, h("h2", { class: "card-title", id: "svc-title" }, "سرویس‌ها"), ltr(ok + "/" + on.length, "count")),
     list);
 }
 
+// Name and domains of a service, editable in its sheet; also the form for
+// a new one (sv = null).
+function serviceEditor(sv) {
+  const f = h("form", { class: "svc-edit" },
+    h("label", { class: "field" }, h("span", {}, "اسم"), h("input", { name: "name", required: true, maxlength: 40, value: sv ? sv.name : "", dir: "auto" })),
+    h("label", { class: "field" }, h("span", {}, "دامنه‌ها (هر خط یکی؛ زیردامنه‌ها خودشان حساب می‌شوند)"),
+      h("textarea", { name: "domains", rows: sv ? 5 : 4, dir: "ltr", spellcheck: "false", required: true, placeholder: "example.com\ncdn.example.net" })),
+    !sv ? h("p", { class: "muted", style: "font-size:.8rem;margin:0" }, "تستش این است که صفحه‌ی اولِ دامنه‌ی اول از هر خروجی باز شود و نگوید «در کشور شما نیست».") : null,
+    h("p", { class: "form-error", role: "alert" }),
+    h("div", { class: "actions" },
+      h("button", { class: "pill dark", type: "submit" }, sv ? "ذخیره" : "افزودن سرویس"),
+      sv && sv.custom ? h("button", { class: "pill ghost danger", type: "button", onclick: () => {
+        if (!confirm("سرویس «" + sv.name + "» حذف شود؟")) return;
+        act(null, () => api("DELETE", "services/" + sv.id), "حذف شد").then(() => $("#service-dialog").close());
+      } }, "حذف سرویس") : null));
+  f.domains.value = sv ? sv.domains.join("\n") : "";
+  f.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const err = $(".form-error", f);
+    err.textContent = "";
+    const body = { name: f.name.value.trim(), domains: f.domains.value.split("\n") };
+    const btn = f.querySelector("[type=submit]");
+    btn.disabled = true;
+    try {
+      const r = sv ? await api("PUT", "services/" + sv.id, body) : await api("POST", "services", body);
+      toast(sv ? "ذخیره شد" : "اضافه شد؛ تستش شروع شد");
+      await refresh(true);
+      poll();
+      openService(sv ? sv.id : r.id);
+    } catch (e) { err.textContent = e.message; }
+    finally { btn.disabled = false; }
+  });
+  return f;
+}
+
 /* ---------- service sheet ---------- */
 
 function openService(id) {
+  const body = $("#service-body");
+  const d = $("#service-dialog");
+  if (id === null) {
+    fill(body,
+      h("div", { class: "sheet-head" }, h("h2", { id: "service-dialog-title" }, "سرویس تازه"),
+        h("button", { class: "round small", type: "button", "data-close": "", "aria-label": "بستن" }, icon("close"))),
+      serviceEditor(null));
+    if (!d.open) d.showModal();
+    $("[name=name]", body).focus();
+    return;
+  }
   const sv = S.services.find((x) => x.id === id);
   if (!sv) return;
-  const body = $("#service-body");
   const live = liveSvc(id);
   const choose = (pin) => act(null, () => api("PUT", "services/" + id, { pin }), pin ? sv.name + " روی " + exitOf(pin).name + " ثابت شد" : sv.name + ": انتخاب خودکار")
     .then(() => openService(id));
@@ -534,20 +592,22 @@ function openService(id) {
       const r = (liveExit(x.id).results || {})[id];
       return h("button", { type: "button", "aria-pressed": sv.pin === x.id ? "true" : "false", onclick: () => choose(x.id) },
         thumb(x.kind),
-        h("span", {}, h("b", {}, x.name), h("small", {}, r ? STATE_WORD[r.state] + (r.detail ? "، " + r.detail : "") : "تست نشده")),
+        h("span", {}, h("b", {}, x.name), h("small", {}, r ? stateWord(id, r.state) + (r.detail ? "، " + r.detail : "") : "تست نشده")),
         h("i", { class: "dot " + (r ? r.state : "") }));
     }));
   const tog = h("label", { class: "switch" },
     h("input", { type: "checkbox", checked: sv.enabled, "aria-label": sv.name + " روشن باشد",
       onchange: (ev) => act(null, () => api("PUT", "services/" + id, { enabled: ev.target.checked })).then(() => openService(id)) }), h("i"));
-  body.replaceChildren(
+  fill(body,
     h("div", { class: "sheet-head" }, h("h2", { id: "service-dialog-title" }, ltr(sv.name)),
       h("button", { class: "round small", type: "button", "data-close": "", "aria-label": "بستن" }, icon("close"))),
     h("div", { class: "toggle-row" }, h("span", {}, h("b", {}, "تست و مسیر این سرویس"),
       h("small", {}, "خاموش که باشد، ترافیکش مثل بقیه‌ی ترافیک می‌رود و تست نمی‌شود.")), tog),
+    sv.id === "youtube" ? h("p", { class: "hint" }, "تست YouTube این است که آیا Premium (تنها راه مطمئن بی‌تبلیغ شدن) از کشور آن خروجی فروخته می‌شود. «بدون Premium» یعنی خود یوتیوب کار می‌کند ولی Premium آنجا نیست.") : null,
+    sv.id === "instagram" ? h("p", { class: "hint" }, "فقط باز شدن اینستاگرام تست می‌شود. موزیک اینستاگرام به کشوری بستگی دارد که اینستاگرام شما را در آن می‌بیند؛ بدون ورود به حساب نمی‌شود دقیق تستش کرد.") : null,
     sv.enabled ? h("div", { class: "field" }, h("span", {}, "از کدام خروجی برود"), choices) : null,
-    h("p", { class: "muted", style: "font-size:.8rem" }, "دامنه‌ها: ", ltr(sv.domains.slice(0, 6).join("  ") + (sv.domains.length > 6 ? "  …" : ""))));
-  const d = $("#service-dialog");
+    h("h3", { class: "card-title", style: "margin-top:.4rem" }, "اسم و دامنه‌ها"),
+    serviceEditor(sv));
   if (!d.open) d.showModal();
 }
 
@@ -561,7 +621,7 @@ function exitMenu(btn, x) {
   const m = $("#menu");
   const i = S.exits.findIndex((e) => e.id === x.id);
   const item = (label, fn, cls) => h("button", { type: "button", role: "menuitem", class: cls || "", onclick: () => { closeMenu(); fn(); } }, label);
-  m.replaceChildren(
+  fill(m,
     x.kind === "warp" && x.enabled ? item("گرفتن IP تازه", () => act(null, () => api("POST", "exits/" + x.id + "/rotate"), x.name + ": IP تازه گرفته شد")) : null,
     item("ویرایش", () => openExit(x)),
     item(x.enabled ? "خاموش کردن" : "روشن کردن", () => act(null, () => api("PUT", "exits/" + x.id, { enabled: !x.enabled }))),
@@ -609,7 +669,7 @@ function viewTests() {
       if (x.enabled) {
         if (l.checking) { st = "none checking"; word = "در حال تست"; }
         else if (l.err) { st = "error"; word = STATE_WORD.error; }
-        else if (r) { st = r.state; word = STATE_WORD[r.state] || r.state; }
+        else if (r) { st = r.state; word = stateWord(sv.id, r.state) || r.state; }
         else word = "تست نشده";
       }
       const cls = ["cell", x.enabled && !l.checking ? "" : st, used ? "used" : "", pinned ? "pinned" : "", used && r && r.state !== "ok" ? "notok" : ""].join(" ");
@@ -725,9 +785,10 @@ function viewSettings() {
   });
 
   const svcList = h("div", { class: "stack", style: "margin-top:1rem" }, S.services.map((sv) => h("div", { class: "toggle-row" },
-    h("span", {}, h("b", {}, ltr(sv.name)), h("small", {}, sv.domains.length + " دامنه")),
+    h("button", { class: "linklike", type: "button", onclick: () => openService(sv.id) }, h("b", {}, ltr(sv.name)), h("small", {}, fa(sv.domains.length) + " دامنه" + (sv.custom ? "، اضافه‌شده" : "") + "؛ ویرایش")),
     h("label", { class: "switch" }, h("input", { type: "checkbox", checked: sv.enabled, "aria-label": sv.name + " روشن باشد",
-      onchange: (ev) => act(null, () => api("PUT", "services/" + sv.id, { enabled: ev.target.checked }), ev.target.checked ? sv.name + " روشن شد" : sv.name + " خاموش شد") }), h("i")))));
+      onchange: (ev) => act(null, () => api("PUT", "services/" + sv.id, { enabled: ev.target.checked }), ev.target.checked ? sv.name + " روشن شد" : sv.name + " خاموش شد") }), h("i")))),
+    h("div", {}, h("button", { class: "pill", type: "button", onclick: () => openService(null) }, icon("plus"), "سرویس تازه")));
 
   const pf = h("form", { class: "form" },
     h("label", { class: "field" }, h("span", {}, "نام کاربری"), h("input", { name: "user", dir: "ltr", autocomplete: "username", value: S.user, required: true })),

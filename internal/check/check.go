@@ -98,6 +98,35 @@ var Builtin = map[string][]Probe{
 		Geo:       []Rule{{Body: "not available in your region"}, {Body: "not available in your country"}},
 		Challenge: cfChallenge,
 	}},
+	// "geo" here means YouTube Premium (the only reliable way to get no
+	// ads) is not sold in the exit's country; YouTube itself still plays.
+	"youtube": {{
+		URL:       "https://www.youtube.com/premium",
+		Follow:    true,
+		Geo:       []Rule{{Body: "premium is not available in your country"}, {Body: "not available in your country"}, {Location: "google.cn"}},
+		Challenge: []Rule{{Location: "google.com/sorry"}, {Status: 429}},
+	}},
+	"instagram": {{
+		URL:       "https://www.instagram.com/",
+		Follow:    true,
+		Geo:       []Rule{{Body: "not available in your country"}},
+		Challenge: []Rule{{Status: 429}, {Location: "/challenge/"}},
+	}},
+}
+
+// Generic is the test for a service added in the panel: its first domain
+// must open, and must not say it's unavailable in this country.
+func Generic(domains []string) []Probe {
+	if len(domains) == 0 {
+		return nil
+	}
+	return []Probe{{
+		URL:    "https://" + domains[0] + "/",
+		Follow: true,
+		Geo: []Rule{{Body: "not available in your country"}, {Body: "not available in your region"},
+			{Body: "isn't available in your country"}, {Body: "isn't available in your region"}, {Status: 451}},
+		Challenge: append([]Rule{{Location: "google.com/sorry"}, {Status: 429}}, cfChallenge...),
+	}}
 }
 
 // LoadProbes returns the built-in probes, replaced per service by any in

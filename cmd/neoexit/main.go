@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -96,24 +97,36 @@ func usage() {
 `)
 }
 
+// publicIP is the server's public IPv4, for the panel address. It asks over
+// IPv4 only (so an IPv6-first server still prints its IPv4), falls back
+// to a second service, then to the first public IPv4 on an interface.
 func publicIP() string {
-	c := &http.Client{Timeout: 6 * time.Second}
-	resp, err := c.Get("https://www.cloudflare.com/cdn-cgi/trace")
-	if err != nil {
-		return "SERVER-IP"
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	for _, line := range splitLines(string(b)) {
-		if len(line) > 3 && line[:3] == "ip=" {
-			ip := line[3:]
-			if net.ParseIP(ip).To4() == nil {
-				return "[" + ip + "]"
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	c := &http.Client{Timeout: 7 * time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) { return d.DialContext(ctx, "tcp4", addr) },
+	}}
+	for _, u := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org", "https://ipv4.icanhazip.com"} {
+		resp, err := c.Get(u)
+		if err != nil {
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		for _, line := range splitLines(string(b)) {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+			if ip := net.ParseIP(line); ip != nil && ip.To4() != nil {
+				return ip.String()
 			}
-			return ip
 		}
 	}
-	return "SERVER-IP"
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsPrivate() && !n.IP.IsLinkLocalUnicast() {
+				return n.IP.String()
+			}
+		}
+	}
+	return "SERVER-IPv4"
 }
 
 func splitLines(s string) []string {

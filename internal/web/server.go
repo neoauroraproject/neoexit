@@ -63,7 +63,9 @@ func (a *App) Handler() http.Handler {
 	api.HandleFunc("DELETE /api/exits/{id}", a.deleteExit)
 	api.HandleFunc("POST /api/exits/{id}/move", a.moveExit)
 	api.HandleFunc("POST /api/exits/{id}/rotate", a.rotateExit)
+	api.HandleFunc("POST /api/services", a.addService)
 	api.HandleFunc("PUT /api/services/{id}", a.editService)
+	api.HandleFunc("DELETE /api/services/{id}", a.deleteService)
 	api.HandleFunc("PUT /api/settings", a.settings)
 	api.HandleFunc("PUT /api/proxy", a.editProxy)
 	api.HandleFunc("PUT /api/password", a.password)
@@ -430,36 +432,104 @@ func (a *App) rotateExit(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) editService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var in struct {
-		Enabled *bool   `json:"enabled"`
-		Pin     *string `json:"pin"`
-	}
+	var in serviceInput
 	if json.NewDecoder(r.Body).Decode(&in) != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	err := a.Store.Update(func(c *config.Config) error {
-		for i := range c.Services {
-			if c.Services[i].ID == id {
-				if in.Enabled != nil {
-					c.Services[i].Enabled = *in.Enabled
-				}
-				if in.Pin != nil {
-					c.Services[i].Pin = *in.Pin
-				}
-				return nil
-			}
+		sv := c.Service(id)
+		if sv == nil {
+			return errors.New("این سرویس دیگر وجود ندارد")
 		}
-		return errors.New("unknown service")
+		return in.apply(sv)
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	a.Engine.Reload()
-	if in.Enabled != nil && *in.Enabled {
+	if (in.Enabled != nil && *in.Enabled) || in.Domains != nil {
 		a.Engine.CheckNow()
 	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+type serviceInput struct {
+	Name    *string   `json:"name"`
+	Enabled *bool     `json:"enabled"`
+	Pin     *string   `json:"pin"`
+	Domains *[]string `json:"domains"`
+}
+
+func (in serviceInput) apply(sv *config.Service) error {
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" || len([]rune(name)) > 40 {
+			return errors.New("اسم سرویس خالی یا خیلی بلند است")
+		}
+		sv.Name = name
+	}
+	if in.Enabled != nil {
+		sv.Enabled = *in.Enabled
+	}
+	if in.Pin != nil {
+		sv.Pin = *in.Pin
+	}
+	if in.Domains != nil {
+		d, err := config.NormalizeDomains(*in.Domains)
+		if err != nil {
+			return err
+		}
+		sv.Domains = d
+	}
+	return nil
+}
+
+func (a *App) addService(w http.ResponseWriter, r *http.Request) {
+	var in serviceInput
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == nil || in.Domains == nil {
+		writeErr(w, http.StatusBadRequest, "اسم و دامنه‌ها لازم است")
+		return
+	}
+	var id string
+	err := a.Store.Update(func(c *config.Config) error {
+		sv := config.Service{Enabled: true, Custom: true}
+		if err := in.apply(&sv); err != nil {
+			return err
+		}
+		sv.ID = c.NewServiceID(sv.Name)
+		id = sv.ID
+		c.Services = append(c.Services, sv)
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.Engine.Reload()
+	a.Engine.CheckNow()
+	writeJSON(w, map[string]string{"id": id})
+}
+
+func (a *App) deleteService(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	err := a.Store.Update(func(c *config.Config) error {
+		sv := c.Service(id)
+		if sv == nil {
+			return nil
+		}
+		if !sv.Custom {
+			return errors.New("سرویس‌های پیش‌فرض حذف نمی‌شوند؛ خاموشش کنید")
+		}
+		c.Services = slices.DeleteFunc(c.Services, func(s config.Service) bool { return s.ID == id })
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.Engine.Reload()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 

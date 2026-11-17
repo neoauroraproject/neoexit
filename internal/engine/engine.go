@@ -363,7 +363,11 @@ func (e *Engine) checkExit(ctx context.Context, cfg config.Config, x config.Exit
 			go func(s config.Service) {
 				defer wg.Done()
 				sctx, cancel := context.WithTimeout(ctx, 40*time.Second)
-				r := check.Service(sctx, d.DialContext, e.probes[s.ID])
+				probes := e.probes[s.ID]
+				if len(probes) == 0 {
+					probes = check.Generic(s.Domains)
+				}
+				r := check.Service(sctx, d.DialContext, probes)
 				cancel()
 				mu.Lock()
 				results[s.ID] = r

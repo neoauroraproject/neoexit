@@ -217,19 +217,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .dash-main { display: grid; gap: 14px; min-width: 0; grid-template-rows: auto 1fr; }
 .dash-side { display: grid; gap: 14px; align-content: start; }
 
-/* exit cards: a row like product cards */
+/* exit cards: every exit visible, wrapping onto new rows */
 .exits {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: calc((100% - 28px) / 3);
+  grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr));
   gap: 14px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  padding-bottom: 2px;
 }
-.exits::-webkit-scrollbar { display: none; }
-.exit-card { scroll-snap-align: start; display: flex; align-items: center; gap: 0.95rem; padding: 1rem 1.1rem; border-radius: var(--r-lg); position: relative; cursor: pointer; text-align: start; transition: transform 160ms var(--ease), background-color 180ms ease; }
+.exit-card { display: flex; min-width: 0; align-items: center; gap: 0.95rem; padding: 1rem 1.1rem; padding-inline-end: 3.4rem; border-radius: var(--r-lg); position: relative; cursor: pointer; text-align: start; transition: transform 160ms var(--ease), background-color 180ms ease; }
 .exit-card:active { transform: scale(0.98); }
 .exit-card[aria-pressed="true"] { background: var(--tile); }
 .exit-card.off { opacity: 0.6; }
@@ -244,7 +238,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .exit-card .sub { font-size: 0.8rem; color: var(--muted); display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .exit-card .sub .bad { color: var(--geo); }
 .exit-card .more { position: absolute; top: 12px; inset-inline-end: 12px; }
-.add-card { justify-content: center; border-style: dashed; border-color: var(--map-land); color: var(--muted); background: transparent; }
+.add-card { padding-inline-end: 1.1rem; justify-content: center; border-style: dashed; border-color: var(--map-land); color: var(--muted); background: transparent; }
 .add-card .thumb { background: transparent; border: 1.5px dashed var(--map-land); box-shadow: none; }
 
 /* map */
@@ -321,6 +315,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .svc-end { display: grid; justify-items: end; gap: 2px; font-size: 0.74rem; color: var(--dark-muted); }
 .cc { font: 600 0.7rem var(--font); letter-spacing: 0.04em; padding: 1px 6px; border-radius: 6px; background: #f1f1f1; color: #2c2c2c; }
 .svc-row.off { opacity: 0.45; }
+.svc-add { width: 100%; display: flex; align-items: center; gap: 0.6rem; margin-top: 6px; padding: 0.55rem 0.35rem; border-radius: 18px; border: 1.5px dashed var(--dark-2); background: transparent; color: var(--dark-muted); font: inherit; font-size: 0.88rem; cursor: pointer; }
+.svc-add .svc-icon { background: transparent; color: inherit; border: 1.5px dashed currentColor; }
+@media (hover: hover) and (pointer: fine) { .svc-add:hover { background: var(--dark-2); color: var(--dark-ink); } }
+.svc-edit { display: grid; gap: 0.8rem; }
+.svc-edit .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.svc-edit .actions .danger { margin-inline-start: auto; color: var(--geo); }
 
 /* ---------- tests matrix ---------- */
 .matrix-scroll { overflow-x: auto; margin: 0 -0.3rem; padding: 0.2rem 0.3rem 0.4rem; }
@@ -383,6 +383,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .seg input:focus-visible + span { outline: 2px solid var(--ink); }
 .toggle-row { display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: center; padding: 0.95rem 1.1rem; border-radius: var(--r-md); background: var(--tile); }
 .toggle-row b { font-weight: 500; display: block; }
+.linklike { all: unset; cursor: pointer; display: block; border-radius: 8px; }
+.linklike:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.linklike small { display: block; color: var(--muted); font-size: 0.8rem; }
 .toggle-row small { color: var(--muted); font-size: 0.8rem; display: block; line-height: 1.6; margin-top: 0.15rem; }
 
 .timeline { list-style: none; padding: 0; margin: 0.6rem 0 0; }
@@ -487,14 +490,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
   .top { flex-wrap: wrap; }
   .tabs { order: 3; width: 100%; margin: 0; }
   .top-tools { margin-inline-start: auto; }
-  .exits { grid-auto-columns: calc((100% - 14px) / 2); }
   .grid2 { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .shell { padding: 16px 16px 40px; }
   #view { margin-top: 1.5rem; }
   .dash-side { grid-template-columns: 1fr; }
-  .exits { grid-auto-columns: 82%; }
+  .exits { gap: 10px; }
+  .exit-card { padding: 0.85rem 1rem; padding-inline-end: 3.2rem; }
   .card { padding: 1.1rem; border-radius: 24px; }
   .map-card { min-height: 0; }
   .map-svg { min-height: 220px; }
