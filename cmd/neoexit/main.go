@@ -29,7 +29,7 @@ import (
 	"neoexit/internal/web"
 )
 
-var version = "1.2.0-dev"
+var version = "1.2.1-dev"
 
 func defaultDir() string {
 	if runtime.GOOS == "linux" {
