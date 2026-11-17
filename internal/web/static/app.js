@@ -210,8 +210,8 @@ $("#check-now").addEventListener("click", (ev) => act(ev.currentTarget, () => ap
 /* ============================ sponsored ============================ */
 
 // One message from the NeoAurora ads service on every page: a card on the
-// dashboard, a line elsewhere and on the login page. The server fetches
-// them (every two hours) and the panel asks it, never an outside host.
+// dashboard, a line elsewhere and on the login page. The panel asks this
+// server, never an outside host; each answer is one counted view.
 const hl = { home: null, sidebar: null, at: {}, busy: {} };
 async function loadHL(place) {
   if (hl.busy[place] || Date.now() - (hl.at[place] || 0) < 10 * 60e3) return;
