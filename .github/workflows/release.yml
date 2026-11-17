@@ -1,0 +1,36 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+      - run: |
+          mkdir dist
+          for a in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$a go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/neoexit-linux-$a ./cmd/neoexit
+          done
+      # Psiphon's console client, built from Psiphon's own (GPLv3) source as
+      # a separate program, so arm64 servers get one too. NeoExit only runs
+      # it and talks to its SOCKS port.
+      - name: Psiphon client
+        continue-on-error: true
+        run: |
+          tag=$(curl -s https://api.github.com/repos/Psiphon-Labs/psiphon-tunnel-core/releases/latest | jq -r .tag_name)
+          git clone --depth 1 --branch "$tag" https://github.com/Psiphon-Labs/psiphon-tunnel-core.git psiphon-src
+          cd psiphon-src/ConsoleClient
+          for a in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$a go build -trimpath -ldflags "-s -w" -o ../../dist/psiphon-linux-$a .
+          done
+      - run: cd dist && sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

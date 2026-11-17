@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NeoExit</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="login" class="login" hidden>
+  <form id="login-form" class="login-card">
+    <div class="logo-row"><img src="icon.svg" alt="" width="40" height="40"><span class="wordmark">NeoExit</span></div>
+    <h1>ورود به پنل</h1>
+    <p class="muted">خروجی‌های رایگان برای سرویس‌های هوش مصنوعی</p>
+    <label class="field"><span>نام کاربری</span><input name="user" autocomplete="username" dir="ltr" required></label>
+    <label class="field"><span>رمز</span><input name="pass" type="password" autocomplete="current-password" dir="ltr" required></label>
+    <p class="form-error" id="login-error" role="alert"></p>
+    <button class="pill dark wide" type="submit">ورود</button>
+  </form>
+</div>
+
+<div id="app" class="shell" hidden>
+  <header class="top">
+    <a class="brand" href="#dashboard" aria-label="NeoExit، داشبورد"><img src="icon.svg" alt="" width="34" height="34"><span class="wordmark">NeoExit</span></a>
+    <nav class="tabs" aria-label="بخش‌ها">
+      <a href="#dashboard" data-view="dashboard">داشبورد</a>
+      <a href="#tests" data-view="tests">جدول تست</a>
+      <a href="#connect" data-view="connect">اتصال</a>
+      <a href="#history" data-view="history">تاریخچه</a>
+      <a href="#settings" data-view="settings">تنظیمات</a>
+    </nav>
+    <div class="top-tools">
+      <button class="pill" id="check-now" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span>تست الان</span></button>
+      <button class="round" id="theme" type="button" aria-label="روشن یا تیره"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg></button>
+      <button class="round" id="logout" type="button" aria-label="خروج از پنل" title="خروج"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l-5-5 5-5M5 12h11M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/></svg></button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+</div>
+
+<dialog id="exit-dialog" class="sheet" aria-labelledby="exit-dialog-title">
+  <form id="exit-form">
+    <div class="sheet-head"><h2 id="exit-dialog-title">افزودن خروجی</h2><button class="round small" type="button" data-close aria-label="بستن"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <fieldset class="kinds" id="kind-field">
+      <legend class="sr">نوع خروجی</legend>
+      <label><input type="radio" name="kind" value="warp"><span class="k-art" data-art="warp"></span><b>WARP</b><small>حساب رایگان کلادفلر</small></label>
+      <label><input type="radio" name="kind" value="psiphon"><span class="k-art" data-art="psiphon"></span><b>سایفون</b><small>رایگان، با انتخاب کشور</small></label>
+      <label><input type="radio" name="kind" value="opera"><span class="k-art" data-art="opera"></span><b>Opera</b><small>رایگان؛ اروپا، آسیا، آمریکا</small></label>
+      <label><input type="radio" name="kind" value="ssh"><span class="k-art" data-art="ssh"></span><b>SSH</b><small>سرور دیگر خودتان</small></label>
+      <label><input type="radio" name="kind" value="socks5"><span class="k-art" data-art="socks5"></span><b>SOCKS5</b><small>هر پروکسی دیگر</small></label>
+      <label><input type="radio" name="kind" value="http"><span class="k-art" data-art="http"></span><b>HTTP</b><small>پروکسی با CONNECT</small></label>
+      <label><input type="radio" name="kind" value="direct4"><span class="k-art" data-art="direct4"></span><b>IPv4 سرور</b><small>آدرس خود سرور</small></label>
+      <label><input type="radio" name="kind" value="direct6"><span class="k-art" data-art="direct6"></span><b>IPv6 سرور</b><small>جدا از IPv4</small></label>
+    </fieldset>
+    <label class="field"><span>اسم</span><input name="name" required maxlength="40"></label>
+    <label class="field" data-for="opera"><span>منطقه</span>
+      <select name="opera_region"><option value="EU">اروپا</option><option value="AS">آسیا</option><option value="AM">آمریکا</option></select></label>
+    <label class="field" data-for="psiphon"><span>کشور خروجی</span><select name="psiphon_region" id="psiphon-region"></select></label>
+    <p class="hint" data-for="psiphon">برنامه‌ی سایفون بار اول (حدود ۱۰ مگابایت) از مخزن خود سایفون دانلود و جدا اجرا می‌شود. وصل شدنش ممکن است یکی دو دقیقه طول بکشد.</p>
+    <p class="hint" data-for="opera">پروکسی‌های رایگان مرورگر Opera. رسمی نیستند و ممکن است روزی از کار بیفتند؛ آن وقت بقیه‌ی خروجی‌ها کار را ادامه می‌دهند.</p>
+    <div data-for="socks5 http ssh" class="stack">
+      <label class="field"><span>آدرس</span><input name="address" dir="ltr" placeholder="1.2.3.4:1080  or  socks5://user:pass@host:port"></label>
+      <div class="row2">
+        <label class="field"><span>نام کاربری</span><input name="user" dir="ltr" autocomplete="off"></label>
+        <label class="field"><span>رمز</span><input name="pass" type="password" dir="ltr" autocomplete="off"></label>
+      </div>
+    </div>
+    <label class="field" data-for="ssh"><span>کلید خصوصی (اختیاری، به‌جای رمز)</span><textarea name="key" dir="ltr" rows="3" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>
+    <p class="hint" data-for="ssh">چیزی روی آن سرور نصب نمی‌شود؛ مثل «ssh -D» از آن بیرون می‌رود. کلید سرور بار اول ذخیره می‌شود و بعد از آن باید یکی بماند.</p>
+    <label class="field" data-for="warp"><span>کلید WARP+ (اختیاری)</span><input name="license" dir="ltr" autocomplete="off"></label>
+    <p class="form-error" id="exit-error" role="alert"></p>
+    <div class="sheet-actions">
+      <button class="pill dark" type="submit" id="exit-save">افزودن</button>
+      <button class="pill ghost" type="button" data-close>انصراف</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="service-dialog" class="sheet" aria-labelledby="service-dialog-title">
+  <div id="service-body"></div>
+</dialog>
+
+<div class="menu" id="menu" role="menu" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="world.js"></script>
+<script src="countries.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
