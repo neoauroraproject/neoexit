@@ -40,6 +40,7 @@ type App struct {
 
 	failMu sync.Mutex
 	fails  map[string][]time.Time
+	spots  spots
 }
 
 // Handler is the panel at /<path>/.
@@ -55,6 +56,8 @@ func (a *App) Handler() http.Handler {
 	mux.Handle(base+"/", headers(fileServer))
 	mux.HandleFunc("POST "+base+"/api/login", a.login)
 	mux.HandleFunc("POST "+base+"/api/logout", a.logout)
+	a.spots.start()
+	mux.HandleFunc("GET "+base+"/api/spot", a.spot)
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/state", a.state)
 	api.HandleFunc("POST /api/check", a.checkNow)
@@ -69,6 +72,7 @@ func (a *App) Handler() http.Handler {
 	api.HandleFunc("PUT /api/settings", a.settings)
 	api.HandleFunc("PUT /api/proxy", a.editProxy)
 	api.HandleFunc("PUT /api/password", a.password)
+	api.HandleFunc("POST /api/spot/open", a.spotOpen)
 	mux.Handle(base+"/api/", http.StripPrefix(base, a.authed(api)))
 	// Anything else: look like nothing is here.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })

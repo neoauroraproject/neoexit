@@ -191,6 +191,7 @@ function showLogin() {
   $("#app").hidden = true;
   $("#login").hidden = false;
   clearTimeout(pollTimer);
+  drawHL();
   $("#login-form [name=user]").focus();
 }
 $("#login-form").addEventListener("submit", async (ev) => {
@@ -206,6 +207,50 @@ $("#login-form").addEventListener("submit", async (ev) => {
 $("#logout").addEventListener("click", async () => { await api("POST", "logout").catch(() => {}); showLogin(); });
 $("#check-now").addEventListener("click", (ev) => act(ev.currentTarget, () => api("POST", "check"), "تست همه‌ی خروجی‌ها شروع شد").then(poll));
 
+/* ============================ sponsored ============================ */
+
+// One message from the NeoAurora ads service on every page: a card on the
+// dashboard, a line elsewhere and on the login page. The server fetches
+// them (every two hours) and the panel asks it, never an outside host.
+const hl = { home: null, sidebar: null, at: {}, busy: {} };
+async function loadHL(place) {
+  if (hl.busy[place] || Date.now() - (hl.at[place] || 0) < 10 * 60e3) return;
+  hl.busy[place] = true;
+  try {
+    const r = await fetch("api/spot?p=" + place, { credentials: "same-origin" }).then((x) => x.json());
+    hl[place] = r.spot || null;
+    hl.at[place] = Date.now();
+  } catch { hl.at[place] = Date.now() - 8 * 60e3; } // try again in two minutes
+  finally { hl.busy[place] = false; }
+}
+function hlCard(a, place) {
+  const open = () => api("POST", "spot/open", { id: a.id, placement: place }).catch(() => {});
+  return h("aside", { class: "hl hl-" + place, "aria-label": a.title },
+    h("span", { class: "hl-mark", "aria-hidden": "true" }, icon("spark")),
+    h("div", { class: "hl-text" },
+      h("div", { class: "hl-top" }, h("span", { class: "hl-tag" }, "تبلیغ"),
+        a.badge ? h("span", { class: "hl-badge" }, a.badge) : null,
+        h("b", { class: "hl-title", dir: "auto" }, a.title)),
+      a.body ? h("p", { class: "hl-body", dir: "auto" }, a.body) : null),
+    a.link ? h("a", { class: "pill dark hl-go", href: a.link, target: "_blank", rel: "noopener noreferrer", onclick: $("#app").hidden ? null : open },
+      a.button || "مشاهده") : null);
+}
+async function drawHL() {
+  const login = !$("#login").hidden;
+  const place = !login && view === "dashboard" ? "home" : "sidebar";
+  const slot = $(login ? "#hl-login" : "#hl");
+  await loadHL(place);
+  const a = hl[place];
+  const cur = slot.firstElementChild;
+  if (cur && a && cur.dataset.id === a.id && cur.dataset.place === place) return;
+  if (!a) { slot.replaceChildren(); return; }
+  const card = hlCard(a, place);
+  card.dataset.id = a.id;
+  card.dataset.place = place;
+  slot.replaceChildren(card);
+}
+setInterval(() => { if (!document.hidden) drawHL(); }, 60e3);
+
 /* ============================ router ============================ */
 
 const VIEWS = ["dashboard", "tests", "connect", "history", "settings"];
@@ -214,6 +259,7 @@ function route() {
   view = VIEWS.includes(v) ? v : "dashboard";
   $$(".tabs a").forEach((a) => (a.dataset.view === view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   if (S) render(true);
+  drawHL();
   window.scrollTo({ top: 0 });
 }
 window.addEventListener("hashchange", route);

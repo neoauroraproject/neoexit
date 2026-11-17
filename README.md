@@ -7,7 +7,7 @@
 <p align="center">
 <a href="https://github.com/neoauroraproject/neoexit/releases/latest"><img src="https://img.shields.io/github/v/release/neoauroraproject/neoexit?style=flat-square&color=ffd54d&labelColor=2c2c2c" alt="release"></a>
 <img src="https://img.shields.io/badge/Ubuntu%20%2F%20Debian-amd64%20%7C%20arm64-ececec?style=flat-square&labelColor=2c2c2c" alt="platform">
-<a href="LICENSE"><img src="https://img.shields.io/github/license/neoauroraproject/neoexit?style=flat-square&color=ececec&labelColor=2c2c2c" alt="license"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-all%20rights%20reserved-ececec?style=flat-square&labelColor=2c2c2c" alt="license: all rights reserved"></a>
 </p>
 
 <p align="center"><img src="docs/screenshots/dashboard.png" alt="داشبورد NeoExit: خروجی‌ها، نقشه‌ی کشورها، وضعیت دسترسی و سرویس‌ها"></p>
@@ -93,5 +93,78 @@ curl -fsSL https://raw.githubusercontent.com/neoauroraproject/neoexit/main/insta
 - WARP و Opera از API رسمی استفاده نمی‌کنند و ممکن است روزی از کار بیفتند؛ آن وقت خروجی‌های دیگر کار را ادامه می‌دهند.
 - پروکسی پیش‌فرض فقط روی همان سرور (`127.0.0.1`) باز است.
 - استفاده از این سرویس‌ها از کشوری که پشتیبانی نمی‌کنند، خلاف قوانین خودشان است و ممکن است به بسته شدن حساب برسد.
+- پنل هر دو ساعت پیام‌های تبلیغاتی NeoAurora را از سرور مرکزی می‌گیرد و در صفحه‌هایش نشان می‌دهد. چیزی از سرور شما فرستاده نمی‌شود، جز اسم محصول و جای پیام.
 
+## حق نشر
+
+© ۲۰۲۶ NeoAurora. همه‌ی حقوق محفوظ است. هرگونه کپی‌برداری، تغییر، انتشار دوباره یا فروش این نرم‌افزار یا بخشی از کد آن بدون اجازه‌ی کتبی ممنوع است. نصب و اجرای نسخه‌های رسمی روی سرورهای خودتان آزاد است. متن کامل در [LICENSE](LICENSE).
+
+</div>
+
+<div align="center">
+
+---
+
+### 🌌 NEO AURORA
+
+<p>
+  <a href="https://t.me/neoaurora">Telegram</a> &nbsp;·&nbsp;
+  <a href="https://t.me/hmraysupport">Support</a> &nbsp;·&nbsp;
+  <a href="https://t.me/neolicensebot">License Bot</a> &nbsp;·&nbsp;
+  <a href="https://github.com/neoauroraproject">GitHub</a>
+</p>
+
+<p>
+  <a href="https://t.me/hmpanel">HMPanel Community</a>
+  &nbsp;·&nbsp;
+  <a href="https://t.me/neotunnels">NeoTunnel Community</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/neoauroraproject?tab=repositories">All Projects</a>
+</p>
+
+<br>
+
+### 💖 Support Our Development
+
+<p>
+  Your support helps us maintain and improve our open-source projects.
+</p>
+
+<p>
+  <a href="https://bscscan.com/address/0x94efb6642b8fcc591c28a8c04db2279908f66e18">
+    <img src="https://img.shields.io/badge/USDT-BEP20-26A17B?style=for-the-badge&logo=tether&logoColor=white" alt="USDT BEP20"/>
+  </a>
+  <br>
+  <code>0x94efb6642b8fcc591c28a8c04db2279908f66e18</code>
+</p>
+
+<p>
+  <a href="https://tonscan.org/address/UQD6NpICg2Q7nF_yFRrKW2_ZgB5LPI1X2KDK0JDjlivwhCJ5">
+    <img src="https://img.shields.io/badge/TON-Network-0098EA?style=for-the-badge&logo=ton&logoColor=white" alt="TON"/>
+  </a>
+  <br>
+  <code>UQD6NpICg2Q7nF_yFRrKW2_ZgB5LPI1X2KDK0JDjlivwhCJ5</code>
+</p>
+
+<p>
+  <a href="https://tronscan.org/#/address/TJsBskCPtbVk6gKxTkcocjJX2qNa62Mo1X">
+    <img src="https://img.shields.io/badge/TRON-Network-FF0000?style=for-the-badge&logo=tron&logoColor=white" alt="TRON"/>
+  </a>
+  <br>
+  <code>TJsBskCPtbVk6gKxTkcocjJX2qNa62Mo1X</code>
+</p>
+
+<br>
+
+⭐ **Enjoying this project? Give it a star!**
+
+<p>
+  Every star helps us grow and reach more developers.
+</p>
+
+**Crafted with ❤️ by the NeoAurora Team**
+
+<sub>© 2026 NeoAurora · All rights reserved · Built with Passion</sub>
+
+---
 </div>

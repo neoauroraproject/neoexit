@@ -1,21 +1,28 @@
-MIT License
+NeoExit
+Copyright (c) 2026 NeoAurora. All rights reserved.
 
-Copyright (c) 2026 NeoAurora
+This software and its source code are the property of NeoAurora. No
+permission is granted to copy, modify, merge, publish, distribute,
+sublicense, sell, or create derivative works from this software or any
+part of it, in source or binary form, without prior written permission
+from NeoAurora.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You may install and run the official releases published by NeoAurora on
+servers you operate, for your own use.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+Versions released before v1.2.0 were published under the MIT License, and
+copies of those versions remain under that license.
+
+---
+
+حق نشر © ۲۰۲۶ NeoAurora. همه‌ی حقوق محفوظ است.
+هرگونه کپی‌برداری، تغییر، انتشار دوباره یا فروش این نرم‌افزار یا بخشی از
+کد آن، بدون اجازه‌ی کتبی NeoAurora ممنوع است. نصب و اجرای نسخه‌های رسمی
+روی سرورهای خودتان آزاد است.
