@@ -25,6 +25,7 @@ import (
 	"neoexit/internal/opera"
 	"neoexit/internal/proxy"
 	"neoexit/internal/psiphon"
+	"neoexit/internal/update"
 )
 
 //go:embed static
@@ -37,10 +38,13 @@ type App struct {
 	Version string
 	// RestartProxy re-opens the proxy after its address changed.
 	RestartProxy func() error
+	Updater      *update.Updater
 
 	failMu sync.Mutex
 	fails  map[string][]time.Time
 	spots  spots
+
+	routingOnce sync.Once
 }
 
 // Handler is the panel at /<path>/.
@@ -73,6 +77,11 @@ func (a *App) Handler() http.Handler {
 	api.HandleFunc("PUT /api/proxy", a.editProxy)
 	api.HandleFunc("PUT /api/password", a.password)
 	api.HandleFunc("POST /api/spot/open", a.spotOpen)
+	api.HandleFunc("POST /api/update/check", a.updateCheck)
+	api.HandleFunc("POST /api/update/apply", a.updateApply)
+	api.HandleFunc("POST /api/routing/install", a.routingInstall)
+	api.HandleFunc("GET /api/routing/files/{name}", a.routingFile)
+	a.routingOnce.Do(func() { go a.keepRouting() })
 	mux.Handle(base+"/api/", http.StripPrefix(base, a.authed(api)))
 	// Anything else: look like nothing is here.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
@@ -206,6 +215,8 @@ type stateView struct {
 	Host     HostInfo         `json:"host"`
 	Snippet  map[string]any   `json:"snippet"`
 	Choices  Choices          `json:"choices"`
+	Update   update.Status    `json:"update"`
+	Routing  routingView      `json:"routing"`
 }
 
 type settingsView struct {
@@ -229,6 +240,8 @@ func (a *App) state(w http.ResponseWriter, r *http.Request) {
 		Snippet:  Snippet(cfg),
 		Settings: settingsView{cfg.CheckMinutes, cfg.SameCountry, cfg.AutoRotate, cfg.RotateHourly, cfg.Other},
 		Choices:  Choices{Opera: opera.Regions, Psiphon: psiphon.Countries},
+		Update:   a.updateStatus(),
+		Routing:  a.routingState(cfg),
 	}
 	for _, x := range cfg.Exits {
 		ev := exitView{ID: x.ID, Kind: x.Kind, Name: x.Name, Enabled: x.Enabled, Address: x.Address, User: x.User,

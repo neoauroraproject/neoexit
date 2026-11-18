@@ -139,15 +139,20 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .stack { display: grid; gap: 0.9rem; }
 
-.switch { position: relative; width: 40px; height: 24px; flex: none; display: inline-block; }
+/* On is green with a check and the knob at the far end; off is a pale
+   track with a grey knob. Not just dark vs grey: they read apart at a glance. */
+.switch { position: relative; width: 48px; height: 28px; flex: none; display: inline-block; }
 .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; width: 100%; height: 100%; cursor: pointer; z-index: 1; }
-.switch i { position: absolute; inset: 0; border-radius: 99px; background: var(--off); transition: background-color 180ms ease; }
-.switch i::after { content: ""; position: absolute; top: 3px; inset-inline-start: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform 200ms var(--ease); }
-.switch input:checked + i { background: var(--dark); }
-:root[data-theme="dark"] .switch input:checked + i { background: var(--yellow); }
-.switch input:checked + i::after { transform: translateX(-16px); }
-[dir="ltr"] .switch input:checked + i::after { transform: translateX(16px); }
+.switch i { position: absolute; inset: 0; border-radius: 99px; background: var(--tile); box-shadow: inset 0 0 0 1.5px var(--off); transition: background-color 180ms ease, box-shadow 180ms ease; }
+.switch i::after { content: ""; position: absolute; top: 4px; inset-inline-start: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--off); box-shadow: 0 1px 2px rgba(0,0,0,.15); transition: transform 200ms var(--ease), background-color 180ms ease; }
+.switch i::before { content: ""; position: absolute; top: 9px; inset-inline-start: 11px; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) scale(.4); opacity: 0; transition: opacity 160ms ease, transform 200ms var(--ease); }
+.switch input:checked + i { background: var(--ok); box-shadow: none; }
+.switch input:checked + i::after { background: #fff; transform: translateX(-20px); }
+.switch input:checked + i::before { opacity: 1; transform: rotate(45deg) scale(1); }
+[dir="ltr"] .switch input:checked + i::after { transform: translateX(20px); }
+.switch input:disabled + i { opacity: .5; }
 .switch input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .switch input:not(:checked):hover + i { box-shadow: inset 0 0 0 1.5px var(--muted); } }
 
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--off); }
 .dot.ok { background: var(--ok); }
@@ -388,6 +393,25 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .linklike small { display: block; color: var(--muted); font-size: 0.8rem; }
 .toggle-row small { color: var(--muted); font-size: 0.8rem; display: block; line-height: 1.6; margin-top: 0.15rem; }
 
+/* whole Xray config: categories, result */
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px; }
+.cat-row { display: grid; grid-template-columns: 1fr minmax(120px, 44%); gap: 0.7rem; align-items: center; padding: 0.55rem 0.6rem 0.55rem 0.9rem; border-radius: var(--r-md); background: var(--tile); font-size: 0.86rem; }
+.cat-row select { height: 38px; min-width: 0; }
+.cat-row.fixed b { justify-self: start; font-weight: 500; padding-inline: 0.9rem; }
+.merge-notes { margin: 1.2rem 0 0; padding-inline-start: 1.2rem; display: grid; gap: 0.35rem; font-size: 0.86rem; color: var(--ink-2); }
+.out-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin: 1.2rem 0 0.6rem; }
+.out-head b { font-weight: 500; }
+a.pill { color: inherit; text-decoration: none; }
+a.pill.dark { color: var(--dark-ink); }
+.big-addr.ver .ltr { font-size: 1.35rem; }
+.file-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1rem; }
+.file-row .pill small { margin-inline-start: 0.4rem; font-size: 0.75rem; }
+pre.notes { margin: 0.8rem 0 0; padding: 0.8rem 1rem; max-height: 220px; overflow: auto; border-radius: var(--r-md); background: var(--tile); font: inherit; font-size: 0.82rem; line-height: 1.7; white-space: pre-wrap; color: var(--ink-2); }
+.note.busy { box-shadow: inset 0 0 0 1.5px var(--ok); }
+.update-banner { margin: 0 0 14px; color: inherit; text-decoration: none; }
+.update-banner .go { margin-inline-start: auto; font-weight: 500; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .update-banner:hover { background: var(--line); } }
+
 .timeline { list-style: none; padding: 0; margin: 0.6rem 0 0; }
 .timeline li { display: grid; grid-template-columns: 74px 26px 1fr; gap: 0.6rem; align-items: start; }
 .timeline time { font-size: 0.8rem; color: var(--muted); padding-top: 0.55rem; text-align: end; }
@@ -480,6 +504,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 }
 .toast.show { opacity: 1; transform: none; visibility: visible; }
 .toast.bad { background: var(--geo); color: #fff; }
+.toast.good { background: var(--ok); color: #fff; display: flex; align-items: center; gap: 0.55rem; }
+.toast.good::before { content: ""; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); margin-bottom: 3px; flex: none; }
+
+/* A save button says it worked, in place, for a moment. */
+.pill.saved, .pill.saved:disabled { background: var(--ok); color: #fff; opacity: 1; }
+.pill.saved::before { content: ""; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); margin: 0 0.15rem 3px; display: inline-block; }
 
 /* ---------- highlight (sponsored message) ---------- */
 .hl-slot:empty { display: none; }

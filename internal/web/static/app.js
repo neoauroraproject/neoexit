@@ -73,9 +73,20 @@ let toastTimer;
 function toast(msg, bad) {
   const t = $("#toast");
   t.textContent = msg;
-  t.className = "toast show" + (bad ? " bad" : "");
+  const kind = bad ? " bad" : " good";
+  t.className = "toast show" + kind;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = "toast" + (bad ? " bad" : "")), 3200);
+  toastTimer = setTimeout(() => (t.className = "toast" + kind), 3200);
+}
+
+// The button that saved turns green with a check for a moment. The page
+// may have been drawn again meanwhile, so find its new copy by its text.
+function markSaved(btn, label) {
+  const b = btn.isConnected ? btn : $$("#view button, dialog[open] button").find((x) => x.textContent === label);
+  if (!b || b.classList.contains("saved")) return;
+  b.classList.add("saved");
+  b.textContent = "ذخیره شد";
+  setTimeout(() => { if (b.isConnected) { b.classList.remove("saved"); b.textContent = label; } }, 1800);
 }
 
 async function api(method, path, body) {
@@ -92,11 +103,13 @@ async function api(method, path, body) {
 }
 
 async function act(btn, fn, done) {
+  const label = btn ? btn.textContent : "";
   if (btn) btn.disabled = true;
   try {
     await fn();
     if (done) toast(done);
     await refresh(true);
+    if (btn && done && btn.type === "submit") markSaved(btn, label);
   } catch (e) {
     toast(e.message, true);
   } finally {
@@ -170,7 +183,7 @@ async function refresh(force) {
 
 function poll() {
   clearTimeout(pollTimer);
-  const busy = S && (S.live.running || (S.live.exits || []).some((x) => x.checking));
+  const busy = S && (S.live.running || (S.live.exits || []).some((x) => x.checking) || ["downloading", "restarting"].includes(S.update.state));
   pollTimer = setTimeout(async () => {
     if (!document.hidden) { try { await refresh(false); } catch {} }
     poll();
@@ -268,16 +281,20 @@ window.addEventListener("hashchange", route);
 function render(force) {
   if (!S) return;
   const v = $("#view");
+  noticeVersion();
   const hasForm = view === "connect" || view === "settings";
   if (!force && hasForm) { updateLive(); return; }
   closeMenu();
   const fn = { dashboard: viewDashboard, tests: viewTests, connect: viewConnect, history: viewHistory, settings: viewSettings }[view];
-  v.replaceChildren(fn());
+  v.replaceChildren(...[updateBanner(), fn()].filter(Boolean));
   $("#check-now").disabled = S.live.running;
   if (view === "dashboard") placePop();
 }
 function updateLive() {
   $("#check-now").disabled = S.live.running;
+  // Form pages aren't redrawn on polls; their live cards are.
+  const uc = $("#update-card");
+  if (uc && !uc.contains(document.activeElement)) fill(uc, updateCardBody());
 }
 
 function head(title, sub, ...tools) {
@@ -772,20 +789,134 @@ function viewConnect() {
 
   return h("div", {},
     head("اتصال", "برنامه‌ها به این پروکسی وصل می‌شوند. SOCKS5 و HTTP هر دو روی همین یک پورت کار می‌کنند."),
-    h("div", { class: "grid2" },
+    mergeCard(),
+    h("div", { class: "grid2", style: "margin-top:14px" },
       h("section", { class: "card" },
         h("h2", { class: "card-title" }, "پروکسی"),
         h("div", { class: "big-addr" }, ltr(addr), h("button", { class: "pill", type: "button", onclick: () => copy(addr) }, icon("copy"), "کپی")),
         notes, form),
-      h("section", { class: "card" },
-        h("h2", { class: "card-title" }, "وصل کردن 3x-ui"),
-        h("p", { class: "muted", style: "margin-top:.3rem" }, "فقط ترافیک سرویس‌های هوش مصنوعی از NeoExit می‌رود؛ بقیه مثل قبل."),
-        h("ol", { class: "steps" },
-          h("li", {}, h("span", {}, "در تنظیمات Xray، یک خروجی تازه بسازید و این را در حالت JSON بچسبانید."),
-            h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.outbound, null, 2)) }, icon("copy"), "خروجی")),
-          h("li", {}, h("span", {}, "در قوانین مسیریابی، این قانون را اضافه کنید."),
-            h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.rule, null, 2)) }, icon("copy"), "قانون")),
-          h("li", {}, h("span", {}, "Xray را ری‌استارت کنید."))))));
+      h("div", { class: "stack" },
+        h("section", { class: "card", id: "routing-card" }, routingCardBody()),
+        h("section", { class: "card" },
+          h("h2", { class: "card-title" }, "روش دستی"),
+          h("p", { class: "muted", style: "margin-top:.3rem" }, "اگر خودتان با تنظیمات Xray کار می‌کنید: فقط ترافیک سرویس‌های هوش مصنوعی از NeoExit می‌رود؛ بقیه مثل قبل."),
+          h("ol", { class: "steps" },
+            h("li", {}, h("span", {}, "در تنظیمات Xray، یک خروجی تازه بسازید و این را در حالت JSON بچسبانید. اولین خروجی نگذارید؛ اولی پیش‌فرض همه‌ی ترافیک است."),
+              h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.outbound, null, 2)) }, icon("copy"), "خروجی")),
+            h("li", {}, h("span", {}, "در قوانین مسیریابی، این قانون را بالای قوانین دیگر (زیر api و مسدودسازی) بگذارید."),
+              h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.rule, null, 2)) }, icon("copy"), "قانون")),
+            h("li", {}, h("span", {}, "Xray را ری‌استارت کنید.")))))));
+}
+
+/* ---------- whole Xray config, merged ---------- */
+
+// Kept across redraws of the page (the pasted config, the choices).
+const mx = { text: "", smart: false, cats: Object.fromEntries(XRAY.CATS.map((c) => [c.id, c.def])), out: null };
+
+function mergeCard() {
+  const input = h("textarea", { rows: 9, dir: "ltr", spellcheck: "false", "aria-label": "تنظیمات کامل Xray",
+    placeholder: '{\n  "log": { ... },\n  "inbounds": [ ... ],\n  "outbounds": [ ... ],\n  "routing": { ... }\n}' });
+  input.value = mx.text;
+  const err = h("p", { class: "form-error", role: "alert" });
+  const smartBox = h("input", { type: "checkbox", checked: mx.smart, "aria-label": "روتینگ هوشمند" });
+  const cats = h("div", { class: "cat-grid" });
+  const out = h("div", {});
+
+  function targets() {
+    let tags = [];
+    try { tags = XRAY.tags(XRAY.parse(input.value)); } catch {}
+    return tags;
+  }
+  function drawCats() {
+    const tags = targets();
+    cats.hidden = !smartBox.checked;
+    fill(cats,
+      h("div", { class: "cat-row fixed" }, h("span", {}, "هوش مصنوعی (همه‌ی سرویس‌های AI)"), h("b", {}, ltr("neoexit"))),
+      XRAY.CATS.map((c) => {
+        const sel = h("select", { "aria-label": c.name, onchange: (ev) => { mx.cats[c.id] = ev.target.value; } },
+          h("option", { value: "" }, "دست نزن"),
+          h("option", { value: "@block" }, "مسدود"),
+          h("option", { value: "@direct" }, "مستقیم از همین سرور"),
+          h("option", { value: "neoexit" }, "NeoExit"),
+          tags.filter((t) => t.protocol !== "blackhole" && t.protocol !== "freedom").map((t) => h("option", { value: t.tag }, t.tag)));
+        if (![...sel.options].some((o) => o.value === mx.cats[c.id])) mx.cats[c.id] = c.def.startsWith("@") ? c.def : "";
+        sel.value = mx.cats[c.id];
+        return h("label", { class: "cat-row" }, h("span", {}, c.name), sel);
+      }));
+  }
+  input.addEventListener("input", () => { mx.text = input.value; err.textContent = ""; drawCats(); });
+  smartBox.addEventListener("change", () => { mx.smart = smartBox.checked; drawCats(); });
+
+  function build() {
+    err.textContent = "";
+    try {
+      mx.out = XRAY.merge(input.value, { outbound: S.snippet.outbound, rule: S.snippet.rule, smart: smartBox.checked, cats: mx.cats });
+    } catch (e) { mx.out = null; err.textContent = e.message; fill(out); return; }
+    drawOut();
+  }
+  function drawOut() {
+    const r = mx.out;
+    if (!r) return fill(out);
+    const rs = S.routing.status;
+    const warn = r.smartUsed && !rs.current
+      ? h("p", { class: "note warn" }, "قوانین هوشمند فایل‌های hmray.dat و hmray-geoip.dat را لازم دارند. " +
+          (S.host.xui ? "اول از کادر «روتینگ هوشمند» پایین همین صفحه نصبشان کنید" : "اول آن‌ها را در پوشه‌ی Xray بگذارید") + "؛ وگرنه Xray بالا نمی‌آید.")
+      : null;
+    const res = h("textarea", { rows: 12, dir: "ltr", readonly: true, spellcheck: "false", "aria-label": "تنظیمات آماده" });
+    res.value = r.text;
+    fill(out,
+      h("ul", { class: "merge-notes" }, r.notes.map((n) => h("li", {}, n))),
+      warn,
+      h("div", { class: "out-head" }, h("b", {}, "تنظیمات آماده"),
+        h("button", { class: "pill dark", type: "button", onclick: () => copy(r.text) }, icon("copy"), "کپی همه")),
+      res,
+      h("ol", { class: "steps" },
+        h("li", {}, h("span", {}, "در 3x-ui همان جایی که کپی کردید (Xray Configs ← Advanced) همه را پاک کنید و این را بچسبانید.")),
+        h("li", {}, h("span", {}, "ذخیره کنید و Xray را ری‌استارت کنید."))));
+  }
+
+  drawCats();
+  drawOut();
+  return h("section", { class: "card" },
+    h("h2", { class: "card-title" }, "راه ساده: کل تنظیمات Xray را بچسبانید"),
+    h("p", { class: "muted", style: "margin-top:.3rem" },
+      "در 3x-ui بروید به Xray Configs ← Advanced، کل متن را کپی کنید و اینجا بچسبانید. خروجی NeoExit و قوانین، هر کدام سر جای درستش اضافه می‌شود و بقیه‌ی تنظیمات شما دست نمی‌خورد. متن از مرورگر شما بیرون نمی‌رود."),
+    h("div", { class: "form", style: "margin-top:1rem" },
+      input, err,
+      h("div", { class: "toggle-row" }, h("span", {}, h("b", {}, "روتینگ هوشمند HMray"),
+        h("small", {}, "ترافیک را بر اساس نوع سرویس به خروجی دلخواه می‌فرستد: ایران مستقیم، بازی به ترکیه، تبلیغات مسدود و… برای هر دسته یکی از خروجی‌های خودتان را انتخاب کنید.")),
+        h("label", { class: "switch" }, smartBox, h("i"))),
+      cats,
+      h("div", {}, h("button", { class: "pill dark", type: "button", onclick: build }, "ساختن تنظیمات"))),
+    out);
+}
+
+/* ---------- Smart Routing lists ---------- */
+
+function routingCardBody() {
+  const R = S.routing, st = R.status;
+  const size = (n) => fa((n / 1048576).toFixed(n > 1048576 ? 1 : 2)) + " MB";
+  let line;
+  if (!S.host.xui) line = h("p", { class: "note" }, "3x-ui روی این سرور پیدا نشد. دو فایل را دانلود کنید و کنار برنامه‌ی Xray بگذارید (در 3x-ui معمولاً ", ltr("/usr/local/x-ui/bin"), ").");
+  else if (st.current) line = h("p", { class: "note" }, h("i", { class: "dot ok" }), "نصب است و به‌روز؛ ", ltr(st.dir), R.auto ? ". با هر به‌روزرسانی NeoExit خودش تازه می‌شود." : ".");
+  else if (st.installed) line = h("p", { class: "note warn" }, "نسخه‌ی قدیمی‌تری در ", ltr(st.dir), " هست.");
+  else line = h("p", { class: "note" }, "هنوز در ", ltr(st.dir || "3x-ui"), " نصب نشده.");
+  const install = S.host.xui && !st.current
+    ? h("button", { class: "pill dark", type: "button", onclick: (ev) => act(ev.currentTarget, async () => {
+        const r = await api("POST", "routing/install");
+        S.routing = r.routing;
+        const c = $("#routing-card");
+        if (c) fill(c, routingCardBody());
+      }, "نصب شد؛ Xray را در 3x-ui ری‌استارت کنید") }, st.installed ? "به‌روز کردن" : "نصب در 3x-ui")
+    : null;
+  return [
+    h("h2", { class: "card-title" }, "روتینگ هوشمند"),
+    h("p", { class: "muted", style: "margin-top:.3rem" }, "فهرست دامنه‌ها و IPهای HMray که قوانین ", ltr("ext:hmray.dat:…"), " از آن خوانده می‌شود."),
+    line,
+    h("div", { class: "file-row" },
+      R.files.map((f) => h("a", { class: "pill", href: "api/routing/files/" + f.name, download: f.name }, ltr(f.name), h("small", { class: "muted" }, size(f.size)))),
+      install),
+  ];
 }
 
 /* ============================ history ============================ */
@@ -855,8 +986,64 @@ function viewSettings() {
       h("section", { class: "card" }, h("h2", { class: "card-title" }, "تست و جابه‌جایی"), f),
       h("div", { class: "stack" },
         h("section", { class: "card" }, h("h2", { class: "card-title" }, "سرویس‌ها"), svcList),
-        h("section", { class: "card" }, h("h2", { class: "card-title" }, "ورود به پنل"), pf,
-          h("p", { class: "muted", style: "margin-top:1rem;font-size:.8rem" }, ltr("NeoExit " + S.version))))));
+        h("section", { class: "card", id: "update-card" }, updateCardBody()),
+        h("section", { class: "card" }, h("h2", { class: "card-title" }, "ورود به پنل"), pf))));
+}
+
+/* ---------- updates ---------- */
+
+const UPDATE_STATE = {
+  downloading: "در حال دانلود و بررسی نسخه‌ی تازه…",
+  restarting: "نصب شد؛ NeoExit دوباره راه می‌افتد…",
+  manual: "نسخه‌ی تازه نصب شد. برنامه را دوباره اجرا کنید تا بالا بیاید.",
+};
+let seenVersion = null;
+
+function updateCardBody() {
+  const u = S.update;
+  const busy = u.state === "downloading" || u.state === "restarting";
+  let line;
+  if (u.state && UPDATE_STATE[u.state]) line = h("p", { class: "note" + (busy ? " busy" : "") }, UPDATE_STATE[u.state]);
+  else if (u.state === "failed") line = h("p", { class: "note warn" }, "به‌روزرسانی نشد: ", ltr(u.problem || "")) ;
+  else if (u.newer) line = h("p", { class: "note" }, h("i", { class: "dot ok" }), "نسخه‌ی تازه آماده است: ", ltr(u.latest));
+  else if (u.err) line = h("p", { class: "note warn" }, "بررسی نشد: ", ltr(u.err));
+  else if (u.latest) line = h("p", { class: "note" }, "به‌روز است. آخرین بررسی " + ago(u.checked) + ".");
+  else line = h("p", { class: "note" }, "هنوز بررسی نشده.");
+  const check = h("button", { class: "pill", type: "button", disabled: busy, onclick: (ev) => act(ev.currentTarget, async () => {
+    S.update = await api("POST", "update/check");
+    toast(S.update.newer ? "نسخه‌ی تازه پیدا شد: " + S.update.latest : "به‌روز است");
+  }) }, "بررسی");
+  const apply = u.newer && u.can
+    ? h("button", { class: "pill dark", type: "button", disabled: busy, onclick: (ev) => act(ev.currentTarget, async () => {
+        S.update = await api("POST", "update/apply");
+        poll();
+      }, "دانلود شروع شد") }, "دانلود و نصب " + u.latest)
+    : null;
+  const manual = u.newer && !u.can
+    ? h("p", { class: "muted", style: "font-size:.82rem;margin-top:.6rem" }, "این نصب خودش به‌روز نمی‌شود؛ دستور نصب را دوباره روی سرور اجرا کنید.")
+    : null;
+  return [
+    h("h2", { class: "card-title" }, "نسخه"),
+    h("div", { class: "big-addr ver" }, ltr("NeoExit " + u.current), u.url && u.newer ? h("a", { class: "pill", href: u.url, target: "_blank", rel: "noopener noreferrer" }, "تغییرات") : null),
+    line,
+    u.newer && u.notes ? h("pre", { class: "notes", dir: "auto" }, u.notes) : null,
+    manual,
+    h("div", { class: "file-row" }, check, apply),
+  ];
+}
+
+// The line on other pages when a new version is out.
+function updateBanner() {
+  const u = S.update;
+  if (!u.newer || view === "settings") return null;
+  return h("a", { class: "note update-banner", href: "#settings" }, h("i", { class: "dot ok" }),
+    "نسخه‌ی تازه‌ی NeoExit آماده است: ", ltr(u.latest), h("span", { class: "go" }, "به‌روزرسانی ←"));
+}
+
+// After a restart into a new version, say so once.
+function noticeVersion() {
+  if (seenVersion && seenVersion !== S.version) toast("NeoExit به " + S.version + " به‌روز شد");
+  seenVersion = S.version;
 }
 
 /* ============================ exit sheet ============================ */

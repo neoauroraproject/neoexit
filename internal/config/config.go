@@ -53,6 +53,9 @@ type Config struct {
 	// Other is the exit for traffic that isn't an AI service: "" = the
 	// server's normal route.
 	Other string `json:"other,omitempty"`
+	// RoutingFiles: the Smart Routing lists were put in 3x-ui's folder from
+	// the panel; keep them there and current after every update.
+	RoutingFiles bool `json:"routing_files,omitempty"`
 }
 
 type Panel struct {

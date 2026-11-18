@@ -26,6 +26,7 @@ import (
 	"neoexit/internal/config"
 	"neoexit/internal/engine"
 	"neoexit/internal/proxy"
+	"neoexit/internal/update"
 	"neoexit/internal/web"
 )
 
@@ -182,7 +183,10 @@ func run(dir, cfgPath string, plain bool, sock string) {
 	if err := restartProxy(); err != nil {
 		log.Fatalf("proxy: %v", err)
 	}
-	app := &web.App{Store: store, Engine: eng, Proxy: px, Version: version, RestartProxy: restartProxy}
+	// After an update, ending the service makes systemd start the new binary.
+	upd := &update.Updater{Current: version, Restart: stop}
+	upd.Start()
+	app := &web.App{Store: store, Engine: eng, Proxy: px, Version: version, RestartProxy: restartProxy, Updater: upd}
 
 	cfg := store.Get()
 	srv := &http.Server{
