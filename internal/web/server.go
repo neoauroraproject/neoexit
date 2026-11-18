@@ -62,6 +62,17 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST "+base+"/api/logout", a.logout)
 	a.spots.start()
 	mux.HandleFunc("GET "+base+"/api/spot", a.spot)
+	api := a.panelAPI(true)
+	mux.Handle(base+"/api/", http.StripPrefix(base, a.authed(api)))
+	// Anything else: look like nothing is here.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	return mux
+}
+
+// panelAPI is what the panel can do, under /api/. The local socket serves
+// it too (without the login, and without what belongs to the panel alone:
+// its password and its ads), so NeoTunnel can offer all of it.
+func (a *App) panelAPI(panel bool) *http.ServeMux {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/state", a.state)
 	api.HandleFunc("POST /api/check", a.checkNow)
@@ -75,17 +86,16 @@ func (a *App) Handler() http.Handler {
 	api.HandleFunc("DELETE /api/services/{id}", a.deleteService)
 	api.HandleFunc("PUT /api/settings", a.settings)
 	api.HandleFunc("PUT /api/proxy", a.editProxy)
-	api.HandleFunc("PUT /api/password", a.password)
-	api.HandleFunc("POST /api/spot/open", a.spotOpen)
+	if panel {
+		api.HandleFunc("PUT /api/password", a.password)
+		api.HandleFunc("POST /api/spot/open", a.spotOpen)
+	}
 	api.HandleFunc("POST /api/update/check", a.updateCheck)
 	api.HandleFunc("POST /api/update/apply", a.updateApply)
 	api.HandleFunc("POST /api/routing/install", a.routingInstall)
 	api.HandleFunc("GET /api/routing/files/{name}", a.routingFile)
 	a.routingOnce.Do(func() { go a.keepRouting() })
-	mux.Handle(base+"/api/", http.StripPrefix(base, a.authed(api)))
-	// Anything else: look like nothing is here.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
-	return mux
+	return api
 }
 
 func headers(h http.Handler) http.Handler {

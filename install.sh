@@ -71,6 +71,14 @@ else
   fi
 fi
 
+chmod 0755 "$TMP/$NAME"
+# 1.4.0 and later set themselves up ("neoexit install"); older ones below.
+if "$TMP/$NAME" 2>&1 | grep -q '^  install '; then
+  "$TMP/$NAME" install || die "install failed"
+  [ -x /usr/local/bin/neotunnel ] && printf '%sNeoTunnel found: its panel manages NeoExit on this server.%s\n\n' "$c_dim" "$c_0"
+  exit 0
+fi
+
 install -m 0755 "$TMP/$NAME" /usr/local/bin/neoexit
 ok "installed $(/usr/local/bin/neoexit version)"
 

@@ -30,7 +30,7 @@ import (
 	"neoexit/internal/web"
 )
 
-var version = "1.3.0-dev"
+var version = "1.4.0-dev"
 
 func defaultDir() string {
 	if runtime.GOOS == "linux" {
@@ -50,6 +50,9 @@ func main() {
 	dir := fs.String("dir", defaultDir(), "settings folder")
 	plain := fs.Bool("http", false, "panel over plain HTTP (local testing only)")
 	sock := fs.String("socket", web.SocketPath, "local API socket for NeoTunnel")
+	psiphonBin := fs.String("psiphon", "", "install: the Psiphon client to use (for a server that can't download it)")
+	asJSON := fs.Bool("json", false, "install: print the result as JSON")
+	keep := fs.Bool("keep-config", false, "uninstall: keep the settings")
 	fs.Parse(os.Args[2:])
 	cfgPath := filepath.Join(*dir, "config.json")
 
@@ -62,6 +65,14 @@ func main() {
 		printLogin(s.Get(), pass, *plain)
 	case "run":
 		run(*dir, cfgPath, *plain, *sock)
+	case "install":
+		if err := install(*dir, *psiphonBin, *asJSON); err != nil {
+			log.Fatal(err)
+		}
+	case "uninstall":
+		if err := uninstall(*dir, *keep); err != nil {
+			log.Fatal(err)
+		}
 	case "password":
 		s, err := config.Open(cfgPath)
 		if err != nil {
@@ -91,6 +102,8 @@ func usage() {
 
   init      create the settings and print the panel address and password
   run       run the service (systemd does this)
+  install   set this program up as the service (keeps existing settings)
+  uninstall remove the service, the program and (without --keep-config) the settings
   info      print the panel address
   password  set a new random panel password and print it
   status    print what the running service sees

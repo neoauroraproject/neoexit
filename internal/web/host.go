@@ -74,7 +74,14 @@ type StatusV1 struct {
 	Services []ServiceStatusV1 `json:"services"`
 	Exits    []ExitStatusV1    `json:"exits"`
 	LastRun  time.Time         `json:"last_run"`
+	// API is the version of the panel API on this socket (/v1/panel/…;
+	// 0 = none, before 1.4.0).
+	API int `json:"api,omitempty"`
 }
+
+// PanelAPI is the version of /v1/panel: 1 = the panel's own /api/ (less
+// its password and ads), its scripts, its login and a password reset.
+const PanelAPI = 1
 
 type ServiceStatusV1 struct {
 	ID    string `json:"id"`
@@ -109,7 +116,52 @@ func (a *App) LocalHandler() http.Handler {
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
+	// Everything the panel does, for NeoTunnel's NeoExit page.
+	mux.Handle("/v1/panel/api/", http.StripPrefix("/v1/panel", a.panelAPI(false)))
+	mux.HandleFunc("GET /v1/panel/assets/{name}", a.panelAsset)
+	mux.HandleFunc("GET /v1/panel/login", func(w http.ResponseWriter, r *http.Request) {
+		p := a.Store.Get().Panel
+		writeJSON(w, map[string]any{"port": p.Port, "path": p.Path, "user": p.User})
+	})
+	mux.HandleFunc("POST /v1/panel/password", a.resetPassword)
 	return mux
+}
+
+// panelAsset serves the panel scripts another panel can reuse: the Xray
+// config merger and the country names and places.
+func (a *App) panelAsset(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name != "xray.js" && name != "countries.js" && name != "world.js" {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := static.ReadFile("static/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Write(b)
+}
+
+// resetPassword sets a new random panel password (and the user name, when
+// given) and returns it: root may, without the old one.
+func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var in struct{ User string }
+	json.NewDecoder(r.Body).Decode(&in)
+	pass := config.RandomString(14)
+	err := a.Store.Update(func(c *config.Config) error {
+		if u := strings.TrimSpace(in.User); u != "" {
+			c.Panel.User = u
+		}
+		c.Panel.SetPassword(pass)
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"user": a.Store.Get().Panel.User, "password": pass})
 }
 
 func (a *App) StatusV1() StatusV1 {
@@ -120,6 +172,7 @@ func (a *App) StatusV1() StatusV1 {
 		Panel:   ":" + itoa(cfg.Panel.Port) + "/" + cfg.Panel.Path + "/",
 		Proxy:   net.JoinHostPort(cfg.Proxy.Listen, itoa(cfg.Proxy.Port)),
 		LastRun: live.LastRun,
+		API:     PanelAPI,
 	}
 	names := map[string]string{}
 	for _, x := range cfg.Exits {
