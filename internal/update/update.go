@@ -215,6 +215,24 @@ func (u *Updater) Apply() error {
 	return nil
 }
 
+// Now checks GitHub and installs the latest release in the foreground, for
+// "neoexit update". It returns the installed tag, or "" when this one is
+// already the latest. Restarting the service is left to the caller.
+func (u *Updater) Now(ctx context.Context) (string, error) {
+	if err := u.Check(ctx); err != nil {
+		return "", err
+	}
+	st := u.Status()
+	if !st.Newer {
+		return "", nil
+	}
+	exe, ok := u.target()
+	if !ok {
+		return "", errors.New("the program can't be replaced here (run as root on Linux)")
+	}
+	return st.Latest, u.install(ctx, st.Latest, exe)
+}
+
 func (u *Updater) install(ctx context.Context, tag, exe string) error {
 	name := "neoexit-linux-" + runtime.GOARCH
 	base := downloadURL + tag + "/"

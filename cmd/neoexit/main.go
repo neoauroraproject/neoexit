@@ -42,6 +42,10 @@ func defaultDir() string {
 func main() {
 	log.SetFlags(0)
 	if len(os.Args) < 2 {
+		if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+			menu(defaultDir(), web.SocketPath, false)
+			return
+		}
 		usage()
 		os.Exit(2)
 	}
@@ -73,14 +77,20 @@ func main() {
 		if err := uninstall(*dir, *keep); err != nil {
 			log.Fatal(err)
 		}
+	case "menu":
+		menu(*dir, *sock, *plain)
 	case "password":
-		s, err := config.Open(cfgPath)
-		if err != nil {
+		if err := resetPassword(cfgPath, *plain); err != nil {
 			log.Fatal(err)
 		}
-		pass := config.RandomString(14)
-		s.Update(func(c *config.Config) error { c.Panel.SetPassword(pass); return nil })
-		printLogin(s.Get(), pass, *plain)
+	case "update":
+		if err := updateNow(); err != nil {
+			log.Fatal(err)
+		}
+	case "restart":
+		if err := restartService(); err != nil {
+			log.Fatal(err)
+		}
 	case "info":
 		s, err := config.Open(cfgPath)
 		if err != nil {
@@ -98,12 +108,15 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `neoexit <command>
+	fmt.Fprint(os.Stderr, `neoexit <command>   (or just "neoexit" for a menu)
 
   init      create the settings and print the panel address and password
   run       run the service (systemd does this)
   install   set this program up as the service (keeps existing settings)
   uninstall remove the service, the program and (without --keep-config) the settings
+  update    install the latest release and restart the service
+  restart   restart the service
+  menu      the interactive menu
   info      print the panel address
   password  set a new random panel password and print it
   status    print what the running service sees

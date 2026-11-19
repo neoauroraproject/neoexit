@@ -84,10 +84,13 @@ curl -fsSL https://raw.githubusercontent.com/neoauroraproject/neoexit/main/insta
 
 | | |
 |---|---|
-| `neoexit info` | panel address and proxy port |
+| `neoexit` | menu: update, password, status, install / repair, uninstall |
+| `neoexit update` | install the latest release and restart |
 | `neoexit password` | set a new random panel password |
+| `neoexit info` | panel address and proxy port |
 | `neoexit status` | services and exits, in the terminal |
-| `install.sh --uninstall` | remove NeoExit |
+| `neoexit restart` | restart the service |
+| `neoexit uninstall` | remove NeoExit (`--keep-config` keeps the settings) |
 
 <div dir="rtl">
 

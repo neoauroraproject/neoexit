@@ -6,20 +6,24 @@
 # Options (after "bash -s --" when piping):
 #   --version vX.Y.Z  install a specific release (default: latest)
 #   --binary PATH     install from a binary you already downloaded
+#   --upgrade         upgrade without opening the menu
 #   --uninstall       remove NeoExit and its settings
 #
-# Running it again upgrades NeoExit and keeps the settings and password.
+# Run again in a terminal on a server that has NeoExit, it opens the menu
+# (update, new password, uninstall...); otherwise it installs or upgrades,
+# keeping the settings and password.
 set -euo pipefail
 
 REPO="neoauroraproject/neoexit"
-VERSION="latest" BINARY="" UNINSTALL=0
+VERSION="latest" BINARY="" UNINSTALL=0 MENU=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) VERSION="$2"; shift ;;
-    --binary) BINARY="$2"; shift ;;
+    --version) VERSION="$2"; MENU=0; shift ;;
+    --binary) BINARY="$2"; MENU=0; shift ;;
+    --upgrade) MENU=0 ;;
     --uninstall) UNINSTALL=1 ;;
-    -h|--help) sed -n '2,12p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0" 2>/dev/null || true; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -40,6 +44,13 @@ if [ "$UNINSTALL" = 1 ]; then
   systemctl daemon-reload
   ok "NeoExit removed"
   exit 0
+fi
+
+# Already installed and someone at the keyboard: the menu. Not from
+# NeoTunnel or a script (no terminal), and only if this NeoExit has one.
+if [ "$MENU" = 1 ] && [ -x /usr/local/bin/neoexit ] && [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then
+  help=$(/usr/local/bin/neoexit </dev/null 2>&1 || true)
+  case "$help" in *$'\n  menu '*) exec /usr/local/bin/neoexit menu </dev/tty ;; esac
 fi
 
 case "$(uname -m)" in
@@ -73,7 +84,8 @@ fi
 
 chmod 0755 "$TMP/$NAME"
 # 1.4.0 and later set themselves up ("neoexit install"); older ones below.
-if "$TMP/$NAME" 2>&1 | grep -q '^  install '; then
+help=$("$TMP/$NAME" </dev/null 2>&1 || true)
+if printf '%s\n' "$help" | grep -q '^  install '; then
   "$TMP/$NAME" install || die "install failed"
   [ -x /usr/local/bin/neotunnel ] && printf '%sNeoTunnel found: its panel manages NeoExit on this server.%s\n\n' "$c_dim" "$c_0"
   exit 0
