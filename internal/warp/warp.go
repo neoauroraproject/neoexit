@@ -218,6 +218,10 @@ func (d *Device) DialContext(ctx context.Context, network, addr string) (net.Con
 	return d.net.DialContext(ctx, network, addr)
 }
 
+func (d *Device) DialUDP(ctx context.Context, addr string) (net.Conn, error) {
+	return d.net.DialContext(ctx, "udp", addr)
+}
+
 func (d *Device) Close() error {
 	d.dev.Close()
 	return nil

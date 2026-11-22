@@ -1,7 +1,7 @@
 // Package proxy is the local SOCKS5 and HTTP proxy (one port; the first
-// byte tells them apart). Each connection is routed by its host name:
-// AI services leave through the exit the engine chose for them, the rest
-// through the exit for other traffic or the server's normal route.
+// byte tells them apart). Each connection is routed by the port's Router
+// (the engine's Plan): by host name, port, network and, when the client
+// asked for an IP, the site name in its first bytes.
 package proxy
 
 import (
@@ -21,15 +21,25 @@ import (
 	"sync/atomic"
 	"time"
 
+	"neoexit/internal/dns"
 	"neoexit/internal/exit"
+	"neoexit/internal/route"
 )
 
-// Router picks the dialer for a host; nil means the server's own route.
-type Router func(host string) (exit.Dialer, string)
+// Router picks the dialer for a request; nil means the server's own route.
+type Router func(route.Request) (exit.Dialer, route.Decision)
 
 type Server struct {
+	// ID is this proxy ("main" or an extra proxy's), for rules that name
+	// it, like Xray's inboundTag.
+	ID         string
 	Route      Router
 	User, Pass string
+	// Sniff: read the first bytes of every connection (a rule names a
+	// protocol), not only of those asked for by IP.
+	Sniff func() bool
+	// Count is told about each finished connection (bytes both ways).
+	Count func(route.Decision, int64)
 
 	Active atomic.Int64 // open connections
 	Total  atomic.Int64
@@ -89,15 +99,66 @@ func (s *Server) serve(c net.Conn) {
 	}
 }
 
-func (s *Server) dial(ctx context.Context, host, port string) (net.Conn, error) {
-	addr := net.JoinHostPort(host, port)
-	d, _ := s.Route(host)
-	if d == nil {
-		var nd net.Dialer
-		nd.Timeout = 10 * time.Second
-		return nd.DialContext(ctx, "tcp", addr)
+func (s *Server) decide(req route.Request) (exit.Dialer, route.Decision) {
+	if s.Route == nil {
+		return nil, route.Decision{Target: "direct", Rule: "default"}
 	}
-	return d.DialContext(ctx, "tcp", addr)
+	return s.Route(req)
+}
+
+func (s *Server) dial(ctx context.Context, req route.Request) (net.Conn, route.Decision, error) {
+	d, dec := s.decide(req)
+	addr := net.JoinHostPort(strings.Trim(req.Host, "[]"), strconv.Itoa(req.Port))
+	if d == nil {
+		// The server's own route: never into its own networks, even by a
+		// name that points there.
+		c, err := dns.Dial(ctx, "tcp", addr)
+		return c, dec, err
+	}
+	c, err := d.DialContext(ctx, "tcp", addr)
+	return c, dec, err
+}
+
+func (s *Server) count(d route.Decision, n int64) {
+	if s.Count != nil {
+		s.Count(d, n)
+	}
+}
+
+// connect routes and dials host:port for a SOCKS CONNECT or an HTTP
+// CONNECT, tells the client through reply, and pipes. When it has to see
+// the client's first bytes (it asked for an IP, or BitTorrent is looked
+// for), it says yes first: a failed dial then just closes.
+func (s *Server) connect(c net.Conn, br *bufio.Reader, host, port string, reply func(ok bool)) {
+	p, err := strconv.Atoi(port)
+	if err != nil || p < 1 || p > 65535 {
+		reply(false)
+		return
+	}
+	req := route.Request{Host: host, Port: p, Network: "tcp", Proxy: s.ID}
+	early := (s.Sniff != nil && s.Sniff()) || net.ParseIP(strings.Trim(host, "[]")) != nil
+	if early {
+		reply(true)
+		c.SetDeadline(time.Time{})
+		b := peek(c, br)
+		req.Sniffed, req.Protocol = sniffName(b), sniffProtocol(b)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	up, dec, err := s.dial(ctx, req)
+	cancel()
+	if err != nil {
+		if !early {
+			reply(false)
+		}
+		s.count(dec, 0)
+		return
+	}
+	defer up.Close()
+	if !early {
+		reply(true)
+	}
+	c.SetDeadline(time.Time{})
+	s.count(dec, pipe(c, br, up))
 }
 
 func (s *Server) auth(user, pass string) bool {
@@ -153,7 +214,7 @@ func (s *Server) socks(c net.Conn, br *bufio.Reader) {
 	if _, err := io.ReadFull(br, req); err != nil {
 		return
 	}
-	if req[1] != 1 { // CONNECT only
+	if req[1] != 1 && req[1] != 3 { // CONNECT and UDP ASSOCIATE
 		c.Write([]byte{5, 7, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -181,18 +242,18 @@ func (s *Server) socks(c net.Conn, br *bufio.Reader) {
 	if _, err := io.ReadFull(br, pb); err != nil {
 		return
 	}
-	port := strconv.Itoa(int(binary.BigEndian.Uint16(pb)))
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	up, err := s.dial(ctx, host, port)
-	cancel()
-	if err != nil {
-		c.Write([]byte{5, 4, 0, 1, 0, 0, 0, 0, 0, 0})
+	if req[1] == 3 {
+		s.associate(c, br)
 		return
 	}
-	defer up.Close()
-	c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
-	c.SetDeadline(time.Time{})
-	pipe(c, br, up)
+	port := strconv.Itoa(int(binary.BigEndian.Uint16(pb)))
+	s.connect(c, br, host, port, func(ok bool) {
+		if ok {
+			c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+		} else {
+			c.Write([]byte{5, 4, 0, 1, 0, 0, 0, 0, 0, 0})
+		}
+	})
 }
 
 func (s *Server) http(c net.Conn, br *bufio.Reader) {
@@ -207,24 +268,22 @@ func (s *Server) http(c net.Conn, br *bufio.Reader) {
 			return
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	if req.Method == http.MethodConnect {
 		host, port, err := net.SplitHostPort(req.Host)
 		if err != nil {
 			host, port = req.Host, "443"
 		}
-		up, err := s.dial(ctx, host, port)
-		if err != nil {
-			io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
-			return
-		}
-		defer up.Close()
-		io.WriteString(c, "HTTP/1.1 200 Connection Established\r\n\r\n")
-		c.SetDeadline(time.Time{})
-		pipe(c, br, up)
+		s.connect(c, br, host, port, func(ok bool) {
+			if ok {
+				io.WriteString(c, "HTTP/1.1 200 Connection Established\r\n\r\n")
+			} else {
+				io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+			}
+		})
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 	// Plain HTTP with an absolute URL.
 	if req.URL.Host == "" {
 		io.WriteString(c, "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
@@ -234,8 +293,10 @@ func (s *Server) http(c net.Conn, br *bufio.Reader) {
 	if err != nil {
 		host, port = req.URL.Host, "80"
 	}
-	up, err := s.dial(ctx, host, port)
+	pn, _ := strconv.Atoi(port)
+	up, dec, err := s.dial(ctx, route.Request{Host: host, Port: pn, Network: "tcp", Protocol: "http", Proxy: s.ID})
 	if err != nil {
+		s.count(dec, 0)
 		io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
 		return
 	}
@@ -247,7 +308,7 @@ func (s *Server) http(c net.Conn, br *bufio.Reader) {
 		return
 	}
 	c.SetDeadline(time.Time{})
-	pipe(c, br, up)
+	s.count(dec, pipe(c, br, up))
 }
 
 func proxyAuth(h string) (string, string, bool) {
@@ -263,17 +324,21 @@ func proxyAuth(h string) (string, string, bool) {
 	return u, p, ok
 }
 
-func pipe(c net.Conn, br *bufio.Reader, up net.Conn) {
+// pipe copies both ways until one side ends, and returns the bytes moved.
+func pipe(c net.Conn, br *bufio.Reader, up net.Conn) int64 {
+	var total atomic.Int64
 	done := make(chan struct{}, 2)
 	go func() {
-		io.Copy(up, br)
+		n, _ := io.Copy(up, br)
+		total.Add(n)
 		if cw, ok := up.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
 		}
 		done <- struct{}{}
 	}()
 	go func() {
-		io.Copy(c, up)
+		n, _ := io.Copy(c, up)
+		total.Add(n)
 		if cw, ok := c.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
 		}
@@ -285,6 +350,7 @@ func pipe(c net.Conn, br *bufio.Reader, up net.Conn) {
 	case <-done:
 	case <-time.After(30 * time.Second):
 	}
+	return total.Load()
 }
 
 var _ = log.Printf

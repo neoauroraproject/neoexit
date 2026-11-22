@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/proxy"
 
 	"neoexit/internal/config"
+	"neoexit/internal/dns"
 	"neoexit/internal/opera"
 	"neoexit/internal/psiphon"
 	"neoexit/internal/warp"
@@ -23,6 +24,12 @@ import (
 type Dialer interface {
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 	Close() error
+}
+
+// UDPDialer is an exit that can carry UDP too (the server's own
+// addresses and WARP); UDP sent to any other exit is dropped.
+type UDPDialer interface {
+	DialUDP(ctx context.Context, addr string) (net.Conn, error)
 }
 
 // Slow kinds need the network (or a download) to start; the engine builds
@@ -82,9 +89,11 @@ func New(ctx context.Context, e config.Exit, o Options) (Dialer, error) {
 type direct struct{ family string }
 
 func (d direct) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	var nd net.Dialer
-	nd.Timeout = 10 * time.Second
-	return nd.DialContext(ctx, "tcp"+d.family, addr)
+	return dns.Dial(ctx, "tcp"+d.family, addr)
+}
+
+func (d direct) DialUDP(ctx context.Context, addr string) (net.Conn, error) {
+	return dns.Dial(ctx, "udp"+d.family, addr)
 }
 
 func (direct) Close() error { return nil }

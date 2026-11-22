@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -35,10 +36,12 @@ const (
 var Kinds = []string{WARP, Psiphon, Opera, SSH, SOCKS5, HTTP, Direct4, Direct6}
 
 type Config struct {
-	Panel    Panel     `json:"panel"`
-	Proxy    Proxy     `json:"proxy"`
-	Exits    []Exit    `json:"exits"`    // in priority order
-	Services []Service `json:"services"` // the AI services checked and routed
+	Panel Panel `json:"panel"`
+	Proxy Proxy `json:"proxy"`
+	// Extra are more SOCKS5/HTTP ports, each with its own login and exit.
+	Extra    []ExtraProxy `json:"extra_proxies,omitempty"`
+	Exits    []Exit       `json:"exits"`    // in priority order
+	Services []Service    `json:"services"` // the AI services checked and routed
 
 	// CheckMinutes is how often every exit is tested against every service.
 	CheckMinutes int `json:"check_minutes"`
@@ -56,6 +59,15 @@ type Config struct {
 	// RoutingFiles: the Smart Routing lists were put in 3x-ui's folder from
 	// the panel; keep them there and current after every update.
 	RoutingFiles bool `json:"routing_files,omitempty"`
+	// Routing is the routing table, checked in order after the AI
+	// services; what matches no rule goes to Other.
+	Routing []Rule `json:"routing,omitempty"`
+	// PrivateDirect lets proxies reach the server's own networks
+	// (127.0.0.1, 10.x...; 3x-ui's "geoip:private"); off, they are
+	// refused, but for AllowPrivate.
+	PrivateDirect bool     `json:"private_direct,omitempty"`
+	AllowPrivate  []string `json:"allow_private,omitempty"`
+	DNS           DNS      `json:"dns"`
 }
 
 type Panel struct {
@@ -72,7 +84,76 @@ type Proxy struct {
 	Port   int    `json:"port"`
 	User   string `json:"user,omitempty"`
 	Pass   string `json:"pass,omitempty"`
+	// Exit: all of this port's traffic through one exit (and nothing
+	// another way while it is down); "" = the routing table.
+	Exit string `json:"exit,omitempty"`
 }
+
+// Rule is one row of the routing table, written like a 3x-ui (Xray)
+// routing rule: every condition given must hold; inside one list, any
+// item will do. Checked in order; the first that matches decides.
+type Rule struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
+	// Domains, as in Xray: "x" (anywhere in the name), "domain:x" (x and
+	// below), "full:x", "regexp:x", "geosite:x" (geosite.dat, else
+	// hmray.dat), "ext:file.dat:x" (hmray.dat built in; other files from
+	// /etc/neoexit/geo or 3x-ui's folder).
+	Domains []string `json:"domains,omitempty"`
+	// IPs: "1.2.3.4", "1.2.3.0/24", "geoip:x" (geoip.dat, else
+	// hmray-geoip.dat; "geoip:private" built in), "ext:file.dat:x".
+	IPs []string `json:"ips,omitempty"`
+	// Ports: "443", "1000-2000", "80,443".
+	Ports   string `json:"ports,omitempty"`
+	Network string `json:"network,omitempty"` // "", "tcp", "udp"
+	// Protocols found in the first bytes: http, tls, quic, bittorrent.
+	Protocols []string `json:"protocols,omitempty"`
+	// Inbounds: the NeoExit proxies it applies to ("main" or an extra
+	// proxy's ID); none = all. Like Xray's inboundTag.
+	Inbounds []string `json:"inbounds,omitempty"`
+	Target   string   `json:"target"` // an exit ID, "direct" or "block"
+}
+
+// Protocols a rule can name.
+var Protocols = []string{"http", "tls", "quic", "bittorrent"}
+
+// DNS is how NeoExit resolves names for traffic it sends out itself (the
+// server's route and its own IPv4/IPv6): Iranian names through Iranian
+// servers, so they get Iranian addresses; the rest through Servers.
+type DNS struct {
+	// IROff turns the Iranian DNS off (all names through Servers).
+	IROff bool `json:"ir_off,omitempty"`
+	// IRServers: empty = DefaultIRServers.
+	IRServers []string `json:"ir_servers,omitempty"`
+	// IRDomains, written like a rule's domains: empty = DefaultIRDomains.
+	IRDomains []string `json:"ir_domains,omitempty"`
+	// Servers for every other name: empty = the server's own DNS.
+	Servers []string `json:"servers,omitempty"`
+}
+
+var (
+	DefaultIRServers = []string{"178.22.122.100", "185.51.200.2", "217.218.127.127"}
+	DefaultIRDomains = []string{"domain:ir", "ext:hmray.dat:iran"}
+)
+
+// ExtraProxy is one more SOCKS5/HTTP port with its own login; it follows
+// the routing table (rules may name it) or sends everything to Exit.
+type ExtraProxy struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Listen string `json:"listen"` // "127.0.0.1" or "0.0.0.0"
+	Port   int    `json:"port"`
+	User   string `json:"user,omitempty"`
+	Pass   string `json:"pass,omitempty"`
+	Exit   string `json:"exit,omitempty"`
+}
+
+// Targets of routing rules besides exit IDs.
+const (
+	TargetDirect = "direct" // the server's own route
+	TargetBlock  = "block"  // refuse the connection
+)
 
 type Exit struct {
 	ID      string `json:"id"`
@@ -300,6 +381,48 @@ func (c *Config) Validate() error {
 	if c.Proxy.Listen != "127.0.0.1" && c.Proxy.User == "" {
 		return errors.New("a proxy open to the internet needs a username and password")
 	}
+	ports := map[int]string{c.Panel.Port: "the panel", c.Proxy.Port: "the main proxy"}
+	pids := map[string]bool{}
+	for _, x := range c.Extra {
+		if x.ID == "" || pids[x.ID] {
+			return fmt.Errorf("proxy id %q is empty or used twice", x.ID)
+		}
+		pids[x.ID] = true
+		if x.Port < 1 || x.Port > 65535 {
+			return fmt.Errorf("%s: ports must be 1-65535", x.Name)
+		}
+		if used, ok := ports[x.Port]; ok {
+			return fmt.Errorf("%s: port %d is already used by %s", x.Name, x.Port, used)
+		}
+		ports[x.Port] = x.Name
+		if x.Listen != "127.0.0.1" && x.Listen != "0.0.0.0" {
+			return fmt.Errorf("%s: bad listen address", x.Name)
+		}
+		if x.Listen != "127.0.0.1" && x.User == "" {
+			return fmt.Errorf("%s: a proxy open to the internet needs a username and password", x.Name)
+		}
+		if x.Exit != "" && !ids[x.Exit] {
+			return fmt.Errorf("%s uses an exit that no longer exists", x.Name)
+		}
+	}
+	if c.Proxy.Exit != "" && !ids[c.Proxy.Exit] {
+		return errors.New("the main proxy uses an exit that no longer exists")
+	}
+	if err := c.checkRouting(ids, pids); err != nil {
+		return err
+	}
+	for _, list := range [][]string{c.DNS.IRServers, c.DNS.Servers} {
+		for _, s := range list {
+			if h, _, err := net.SplitHostPort(s); (err != nil || net.ParseIP(h) == nil) && net.ParseIP(s) == nil {
+				return fmt.Errorf("DNS server %q is not an IP (or IP:port)", s)
+			}
+		}
+	}
+	for _, a := range c.AllowPrivate {
+		if _, _, err := net.ParseCIDR(a); err != nil && net.ParseIP(a) == nil {
+			return fmt.Errorf("%q is not an IP or CIDR", a)
+		}
+	}
 	return nil
 }
 
@@ -382,6 +505,93 @@ func NormalizeDomains(in []string) ([]string, error) {
 		return nil, errors.New("حداکثر ۳۰۰ دامنه")
 	}
 	return out, nil
+}
+
+func (c *Config) checkRouting(ids, proxies map[string]bool) error {
+	target := func(t string) bool { return t == TargetDirect || t == TargetBlock || ids[t] }
+	if len(c.Routing) > 500 {
+		return errors.New("at most 500 rules")
+	}
+	seen := map[string]bool{}
+	for i, x := range c.Routing {
+		n := i + 1
+		if x.ID == "" || seen[x.ID] {
+			return fmt.Errorf("rule %d: id empty or used twice", n)
+		}
+		seen[x.ID] = true
+		if !target(x.Target) {
+			return fmt.Errorf("قانون %d به خروجی‌ای می‌رود که دیگر نیست", n)
+		}
+		if x.Network != "" && x.Network != "tcp" && x.Network != "udp" {
+			return fmt.Errorf("قانون %d: شبکه tcp یا udp است", n)
+		}
+		for _, p := range x.Protocols {
+			if !slices.Contains(Protocols, p) {
+				return fmt.Errorf("قانون %d: پروتکل %q شناخته نیست", n, p)
+			}
+		}
+		for _, in := range x.Inbounds {
+			if in != "main" && !proxies[in] {
+				return fmt.Errorf("قانون %d: پروکسی %q دیگر نیست", n, in)
+			}
+		}
+		if len(x.Domains) == 0 && len(x.IPs) == 0 && x.Ports == "" && x.Network == "" && len(x.Protocols) == 0 && len(x.Inbounds) == 0 {
+			return fmt.Errorf("قانون %d هیچ شرطی ندارد", n)
+		}
+	}
+	return nil
+}
+
+// UsesExit says whether any proxy or rule sends traffic to exit id, and
+// names it.
+func (c *Config) UsesExit(id string) string {
+	if c.Proxy.Exit == id {
+		return "پروکسی اصلی"
+	}
+	for _, x := range c.Extra {
+		if x.Exit == id {
+			return "پروکسی «" + x.Name + "»"
+		}
+	}
+	for i, x := range c.Routing {
+		if x.Target == id {
+			return fmt.Sprintf("قانون %d روتینگ", i+1)
+		}
+	}
+	return ""
+}
+
+// NewRuleID returns an unused rule ID.
+func (c *Config) NewRuleID() string {
+	for {
+		id := "r" + RandomString(6)
+		used := false
+		for _, x := range c.Routing {
+			used = used || x.ID == id
+		}
+		if !used {
+			return id
+		}
+	}
+}
+
+// ExtraProxy returns the extra proxy with this ID.
+func (c *Config) ExtraProxy(id string) *ExtraProxy {
+	for i := range c.Extra {
+		if c.Extra[i].ID == id {
+			return &c.Extra[i]
+		}
+	}
+	return nil
+}
+
+// NewExtraID returns an unused extra proxy ID.
+func (c *Config) NewExtraID() string {
+	for n := 1; ; n++ {
+		if id := fmt.Sprintf("p%d", n); c.ExtraProxy(id) == nil {
+			return id
+		}
+	}
 }
 
 // NewExitID returns an ID not used yet, starting from base.

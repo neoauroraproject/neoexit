@@ -141,6 +141,7 @@ const ICON = {
   minus: `<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>`,
   expand: `<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6"/></svg>`,
   close: `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  edit: `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg>`,
   copy: `<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="3"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`,
   spark: `<svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/></svg>`,
   pin: `<svg viewBox="0 0 24 24"><path d="M14 2l8 8-3 1-4 4 1 5-2 2-5-5-5 5-1-1 5-5-5-5 2-2 5 1 4-4z"/></svg>`,
@@ -266,7 +267,7 @@ setInterval(() => { if (!document.hidden) drawHL(); }, 60e3);
 
 /* ============================ router ============================ */
 
-const VIEWS = ["dashboard", "tests", "connect", "history", "settings"];
+const VIEWS = ["dashboard", "tests", "connect", "routing", "history", "settings"];
 function route() {
   const v = location.hash.slice(1);
   view = VIEWS.includes(v) ? v : "dashboard";
@@ -282,11 +283,12 @@ function render(force) {
   if (!S) return;
   const v = $("#view");
   noticeVersion();
-  const hasForm = view === "connect" || view === "settings";
+  const hasForm = view === "connect" || view === "settings" || view === "routing";
   if (!force && hasForm) { updateLive(); return; }
   closeMenu();
-  const fn = { dashboard: viewDashboard, tests: viewTests, connect: viewConnect, history: viewHistory, settings: viewSettings }[view];
+  const fn = { dashboard: viewDashboard, tests: viewTests, connect: viewConnect, routing: viewRouting, history: viewHistory, settings: viewSettings }[view];
   v.replaceChildren(...[updateBanner(), fn()].filter(Boolean));
+  if (view === "routing") drawSaveBar();
   $("#check-now").disabled = S.live.running;
   if (view === "dashboard") placePop();
 }
@@ -794,6 +796,9 @@ function viewConnect() {
       h("section", { class: "card" },
         h("h2", { class: "card-title" }, "پروکسی"),
         h("div", { class: "big-addr" }, ltr(addr), h("button", { class: "pill", type: "button", onclick: () => copy(addr) }, icon("copy"), "کپی")),
+        h("div", { class: "toggle-row", style: "margin-top:.9rem" },
+          h("span", {}, h("b", {}, "ترافیک این پروکسی"), h("small", {}, extraExitName(p))),
+          h("button", { class: "pill", type: "button", onclick: () => openExtra("main") }, "تغییر")),
         notes, form),
       h("div", { class: "stack" },
         h("section", { class: "card", id: "routing-card" }, routingCardBody()),
@@ -805,7 +810,412 @@ function viewConnect() {
               h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.outbound, null, 2)) }, icon("copy"), "خروجی")),
             h("li", {}, h("span", {}, "در قوانین مسیریابی، این قانون را بالای قوانین دیگر (زیر api و مسدودسازی) بگذارید."),
               h("button", { class: "pill", type: "button", onclick: () => copy(JSON.stringify(S.snippet.rule, null, 2)) }, icon("copy"), "قانون")),
-            h("li", {}, h("span", {}, "Xray را ری‌استارت کنید.")))))));
+            h("li", {}, h("span", {}, "Xray را ری‌استارت کنید.")))))),
+    extraCard());
+}
+
+/* ---------- extra proxies ---------- */
+
+// The host people put in their apps: 127.0.0.1 for a local-only port,
+// otherwise the address this panel was opened at.
+function extraHost(x) { return x.listen === "127.0.0.1" ? "127.0.0.1" : location.hostname; }
+function extraLink(x) {
+  const cred = x.user ? encodeURIComponent(x.user) + ":" + encodeURIComponent(x.pass || "") + "@" : "";
+  return "socks5://" + cred + extraHost(x) + ":" + x.port;
+}
+function targetName(t) {
+  if (t === "direct") return "مستقیم";
+  if (t === "block") return "مسدود";
+  const e = exitOf(t);
+  return e ? e.name : "؟";
+}
+function extraExitName(x) {
+  return x.exit ? "همه از " + targetName(x.exit) : "طبق جدول روتینگ";
+}
+
+function extraCard() {
+  const list = (S.extra_proxies || []).map((x) => {
+    const e = x.exit ? exitOf(x.exit) : null;
+    const down = x.exit && !(liveExit(x.exit) || {}).up;
+    return h("div", { class: "toggle-row" },
+      h("button", { class: "linklike", type: "button", onclick: () => openExtra(x.id) },
+        h("b", {}, h("i", { class: "dot " + (!x.running ? "error" : down ? "down" : "ok") }), " ", x.name, " ", ltr(extraHost(x) + ":" + x.port)),
+        h("small", {}, extraExitName(x) + (e && !e.enabled ? " (خاموش)" : down ? " (الان قطع است)" : "") +
+          (x.running ? "؛ " + fa(x.conns) + " اتصال" : "؛ پورت باز نشد") + (x.user ? "؛ با رمز" : ""))),
+      h("div", { class: "actions-inline" },
+        h("button", { class: "pill", type: "button", title: "لینک socks5://", onclick: () => copy(extraLink(x)) }, icon("copy"), "لینک"),
+        h("button", { class: "pill", type: "button", title: "خروجی برای Xray / 3x-ui", onclick: () => copy(JSON.stringify(x.outbound, null, 2)) }, icon("copy"), "Xray")));
+  });
+  return h("section", { class: "card", style: "margin-top:14px" },
+    h("div", { class: "card-head" }, h("h2", { class: "card-title" }, "پروکسی‌های بیشتر"),
+      h("button", { class: "pill dark", type: "button", onclick: () => openExtra(null) }, icon("plus"), "پروکسی تازه")),
+    h("p", { class: "muted", style: "margin-top:.3rem" }, "هر کدام پورت و رمز خودش را دارد و SOCKS5 و HTTP (با UDP) را با هم جواب می‌دهد. یا همه‌ی ترافیکش از یک خروجی می‌رود (مثلاً فقط IPv4)، یا طبق جدول صفحه‌ی «روتینگ» می‌رود؛ قانون‌ها می‌توانند فقط برای یک پروکسی باشند، مثل inboundTag در 3x-ui. برای اینکه همه‌ی ترافیک 3x-ui به NeoExit برسد، خروجی Xray یکی از این‌ها را اول خروجی‌های 3x-ui بگذارید و قانون‌های روتینگ آنجا را بردارید."),
+    list.length ? h("div", { class: "stack", style: "margin-top:1rem" }, list)
+      : h("p", { class: "note" }, "هنوز پروکسی دیگری نساخته‌اید. مثلاً یکی فقط از WARP و یکی فقط از سایفون آلمان، برای اینباندها یا کاربرهای مختلف 3x-ui."));
+}
+
+// Bytes in a short Persian form.
+function fmtBytes(n) {
+  if (!n) return "۰";
+  const u = ["بایت", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return fa(n < 10 && i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
+}
+// What went through one rule since NeoExit started.
+function statOf(key) {
+  const c = (S.stats || {})[key];
+  return c ? fa(c.conns) + " اتصال · " + fmtBytes(c.bytes) : "—";
+}
+// Everything that went out as AI.
+function aiStat() {
+  let c = 0, b = 0;
+  for (const [k, v] of Object.entries(S.stats || {})) if (k.startsWith("service:")) { c += v.conns; b += v.bytes; }
+  return c ? fa(c) + " اتصال · " + fmtBytes(b) : "—";
+}
+const proxyName = (id) => id === "main" ? "پروکسی اصلی" : ((S.extra_proxies || []).find((p) => p.id === id) || { name: id }).name;
+
+// The sheet of a proxy: an extra one (id), a new one (null) or the main
+// proxy ("main", only where its traffic goes).
+function openExtra(id) {
+  const main = id === "main";
+  const x = main ? S.proxy : id ? (S.extra_proxies || []).find((p) => p.id === id) : null;
+  if (id && !x) return;
+  const body = $("#proxy-body");
+  const d = $("#proxy-dialog");
+  const local = !x || x.listen === "127.0.0.1";
+  const fixed = !!(x && x.exit);
+  let f;
+  const syncMode = () => { f.exit.closest("label").hidden = f.mode.value !== "exit"; $(".exit-hint", f).hidden = f.mode.value !== "exit"; };
+  f = h("form", { class: "svc-edit" },
+    main ? null : h("label", { class: "field" }, h("span", {}, "اسم"), h("input", { name: "name", maxlength: 40, dir: "auto", value: x ? x.name : "", placeholder: "پروکسی تازه" })),
+    h("fieldset", { class: "seg" }, h("legend", { class: "sr" }, "ترافیک این پروکسی"),
+      h("label", {}, h("input", { type: "radio", name: "mode", value: "table", checked: !fixed, onchange: syncMode }), h("span", {}, "طبق جدول روتینگ")),
+      h("label", {}, h("input", { type: "radio", name: "mode", value: "exit", checked: fixed, onchange: syncMode }), h("span", {}, "همه از یک خروجی"))),
+    h("label", { class: "field" }, h("span", {}, "خروجی"),
+      h("select", { name: "exit" }, S.exits.map((e) => h("option", { value: e.id, selected: x && x.exit === e.id }, e.name + (e.enabled ? "" : " (خاموش)"))))),
+    h("p", { class: "hint exit-hint" }, "همه‌ی ترافیک این پورت از همین خروجی می‌رود (آدرس‌های داخلی سرور جدا). اگر قطع شود، اتصال‌ها قطع می‌شوند و از راه دیگری نمی‌روند."),
+    h("p", { class: "hint" }, "«طبق جدول روتینگ»: هوش مصنوعی از خروجی هوشمند، بقیه با قانون‌های صفحه‌ی روتینگ؛ قانون‌ها می‌توانند فقط برای این پروکسی باشند (مثل inboundTag در 3x-ui)."),
+    main ? null : [
+      h("fieldset", { class: "seg" }, h("legend", { class: "sr" }, "چه کسی وصل شود"),
+        h("label", {}, h("input", { type: "radio", name: "listen", value: "127.0.0.1", checked: local }), h("span", {}, "فقط همین سرور")),
+        h("label", {}, h("input", { type: "radio", name: "listen", value: "0.0.0.0", checked: !local }), h("span", {}, "از هر جا، با رمز"))),
+      h("label", { class: "field" }, h("span", {}, "پورت" + (x ? "" : " (خالی = یک پورت آزاد)")), h("input", { name: "port", type: "number", min: 1, max: 65535, dir: "ltr", value: x ? x.port : "" })),
+      h("div", { class: "row2" },
+        h("label", { class: "field" }, h("span", {}, "نام کاربری"), h("input", { name: "user", dir: "ltr", autocomplete: "off", value: x ? x.user || "" : "" })),
+        h("label", { class: "field" }, h("span", {}, "رمز"), h("input", { name: "pass", dir: "ltr", autocomplete: "off", value: x ? x.pass || "" : "" })))],
+    h("p", { class: "form-error", role: "alert" }),
+    h("div", { class: "actions" },
+      h("button", { class: "pill dark", type: "submit" }, x ? "ذخیره" : "ساختن پروکسی"),
+      x && !main ? h("button", { class: "pill ghost danger", type: "button", onclick: () => {
+        if (!confirm("پروکسی «" + x.name + "» حذف شود؟ برنامه‌هایی که به آن وصل‌اند قطع می‌شوند.")) return;
+        act(null, () => api("DELETE", "proxies/" + x.id), "حذف شد").then(() => d.close());
+      } }, "حذف") : null));
+  f.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const err = $(".form-error", f);
+    err.textContent = "";
+    const b = { exit: f.mode.value === "exit" ? f.exit.value : "" };
+    if (!main) {
+      Object.assign(b, { listen: f.listen.value, user: f.user.value.trim(), pass: f.pass.value });
+      if (f.name.value.trim()) b.name = f.name.value.trim();
+      if (f.port.value) b.port = Number(f.port.value);
+      if (b.listen !== "127.0.0.1" && (!b.user || !b.pass)) { err.textContent = "پروکسی باز روی اینترنت نام کاربری و رمز لازم دارد."; return; }
+    }
+    const btn = f.querySelector("[type=submit]");
+    btn.disabled = true;
+    try {
+      if (x) await api("PUT", "proxies/" + (main ? "main" : x.id), b); else await api("POST", "proxies", b);
+      toast(x ? "ذخیره شد" : "پروکسی ساخته شد");
+      await refresh(true);
+      d.close();
+    } catch (e) { err.textContent = e.message; }
+    finally { btn.disabled = false; }
+  });
+  syncMode();
+  fill(body,
+    h("div", { class: "sheet-head" }, h("h2", { id: "proxy-dialog-title" }, main ? "پروکسی اصلی" : x ? x.name : "پروکسی تازه"),
+      h("button", { class: "round small", type: "button", "data-close": "", "aria-label": "بستن" }, icon("close"))),
+    f);
+  if (!d.open) d.showModal();
+}
+
+/* ============================ routing ============================ */
+
+// The table being edited; saved as a whole, like 3x-ui.
+let RT = null;
+function rtDraft() {
+  if (!RT) RT = {
+    rules: JSON.parse(JSON.stringify(S.rules || [])),
+    other: S.settings.other || "",
+    private_direct: !!S.private_direct,
+    allow_private: [...(S.settings.allow_private || [])],
+    dirty: false,
+  };
+  return RT;
+}
+function rtChanged() { rtDraft().dirty = true; render(true); }
+
+const PROTO = { http: "HTTP", tls: "TLS", quic: "QUIC", bittorrent: "BitTorrent" };
+function chips(list, max = 3) {
+  if (!list || !list.length) return h("span", { class: "muted" }, "—");
+  return h("span", { class: "chips" },
+    list.slice(0, max).map((x) => h("span", { class: "chip ltr", dir: "ltr", title: x }, x)),
+    list.length > max ? h("span", { class: "chip more", title: list.slice(max).join("\n") }, "+" + fa(list.length - max)) : null);
+}
+function targetLabel(t) {
+  if (t === "direct") return h("span", { class: "tgt direct" }, "مستقیم");
+  if (t === "block") return h("span", { class: "tgt block" }, "مسدود");
+  const e = exitOf(t);
+  return h("span", { class: "tgt exit" }, e ? e.name : "؟");
+}
+// A select of where traffic can go: direct, block or an exit.
+function targetSelect(name, value, none) {
+  const opt = (v, label) => h("option", { value: v, selected: value === v }, label);
+  return h("select", name ? { name } : {},
+    none ? opt("", none) : null,
+    opt("direct", "مستقیم (direct)"),
+    opt("block", "مسدود (block)"),
+    S.exits.map((e) => opt(e.id, e.name + (e.enabled ? "" : " (خاموش)"))));
+}
+
+function viewRouting() {
+  const d = rtDraft();
+  const move = (i, dir) => { [d.rules[i], d.rules[i + dir]] = [d.rules[i + dir], d.rules[i]]; rtChanged(); };
+  const rows = d.rules.map((r, i) => h("tr", { class: r.disabled ? "off" : "" },
+    h("td", { "data-l": "#" }, fa(i + 1)),
+    h("td", { "data-l": "فعال" }, h("label", { class: "switch small" },
+      h("input", { type: "checkbox", checked: !r.disabled, "aria-label": "قانون " + (i + 1) + " فعال باشد", onchange: (ev) => { r.disabled = !ev.target.checked; rtChanged(); } }), h("i"))),
+    h("td", { "data-l": "دامنه" }, r.name ? h("b", { class: "rule-name" }, r.name) : null, chips(r.domains)),
+    h("td", { "data-l": "IP" }, chips(r.ips, 2)),
+    h("td", { "data-l": "پورت" }, r.ports ? ltr(r.ports) : h("span", { class: "muted" }, "—")),
+    h("td", { "data-l": "شبکه" }, r.network ? r.network.toUpperCase() : h("span", { class: "muted" }, "—")),
+    h("td", { "data-l": "پروتکل" }, (r.protocols || []).length ? r.protocols.map((p) => PROTO[p] || p).join("، ") : h("span", { class: "muted" }, "—")),
+    h("td", { "data-l": "ورودی" }, (r.inbounds || []).length ? r.inbounds.map(proxyName).join("، ") : h("span", { class: "muted" }, "همه")),
+    h("td", { "data-l": "خروجی" }, targetLabel(r.target)),
+    h("td", { "data-l": "ترافیک", class: "stat" }, statOf("rule:" + r.id)),
+    h("td", { class: "ops" },
+      h("button", { class: "round small", type: "button", "aria-label": "ویرایش قانون " + (i + 1), title: "ویرایش", onclick: () => openRule(i) }, icon("edit")),
+      h("button", { class: "round small", type: "button", "aria-label": "بالاتر", disabled: i === 0, onclick: () => move(i, -1) }, "↑"),
+      h("button", { class: "round small", type: "button", "aria-label": "پایین‌تر", disabled: i === d.rules.length - 1, onclick: () => move(i, 1) }, "↓"),
+      h("button", { class: "round small", type: "button", "aria-label": "حذف قانون " + (i + 1), title: "حذف", onclick: () => { d.rules.splice(i, 1); rtChanged(); } }, icon("close")))));
+
+  const aiNames = S.services.filter((s) => s.enabled).map((s) => s.name + " ← " + ((exitOf(liveSvc(s.id).exit) || {}).name || "…"));
+  const pinned = (n, title, body, target, stat) => h("tr", { class: "pinned" },
+    h("td", { "data-l": "#" }, n), h("td", {}, icon("pin")),
+    h("td", { colspan: 6, class: "wide" }, h("b", {}, title), h("small", { class: "muted" }, body)),
+    h("td", { "data-l": "خروجی" }, target), h("td", { "data-l": "ترافیک", class: "stat" }, stat), h("td", {}));
+
+  const table = h("table", { class: "rt" },
+    h("thead", {}, h("tr", {}, ["#", "", "دامنه", "IP", "پورت", "شبکه", "پروتکل", "ورودی", "خروجی", "ترافیک", ""].map((t) => h("th", { scope: "col" }, t)))),
+    h("tbody", {},
+      pinned("۰", "آدرس‌های داخلی سرور", " · geoip:private؛ 127.0.0.1، 10.x، 192.168.x…", targetLabel(d.private_direct ? "direct" : "block"), statOf("private")),
+      pinned("۰", "هوش مصنوعی", " · همیشه از خروجی هوشمند هر سرویس: " + aiNames.join("، "), h("span", { class: "tgt smart" }, "هوشمند"), aiStat()),
+      rows,
+      h("tr", { class: "pinned" }, h("td", { "data-l": "#" }, "∞"), h("td", {}, icon("pin")),
+        h("td", { colspan: 6, class: "wide" }, h("b", {}, "بقیه‌ی ترافیک"), h("small", { class: "muted" }, " · هر چه به هیچ قانونی نخورد")),
+        h("td", { "data-l": "خروجی" }, targetSelect("", d.other, "مسیر عادی سرور (direct)")),
+        h("td", { "data-l": "ترافیک", class: "stat" }, statOf("default")), h("td", {}))));
+  $("select", table.tBodies[0].lastElementChild).addEventListener("change", (ev) => { d.other = ev.target.value; d.dirty = true; drawSaveBar(); });
+  if (!d.rules.length) table.tBodies[0].insertBefore(h("tr", {}, h("td", { colspan: 11, class: "empty" }, "قانونی نیست. «قانون تازه» یا «دسته‌های آماده» را بزنید.")), table.tBodies[0].lastElementChild);
+
+  const priv = h("div", { class: "stack" },
+    h("fieldset", { class: "seg" }, h("legend", { class: "sr" }, "آدرس‌های داخلی سرور"),
+      h("label", {}, h("input", { type: "radio", name: "priv", checked: !d.private_direct, onchange: () => { d.private_direct = false; rtChanged(); } }), h("span", {}, "مسدود (پیشنهادی)")),
+      h("label", {}, h("input", { type: "radio", name: "priv", checked: d.private_direct, onchange: () => { d.private_direct = true; rtChanged(); } }), h("span", {}, "مستقیم، مثل 3x-ui"))),
+    h("p", { class: "hint", style: "margin:0" }, d.private_direct
+      ? "کاربرها می‌توانند به سرویس‌های روی خود سرور (مثلاً پنل‌ها روی 127.0.0.1) و شبکه‌ی داخلی برسند."
+      : "کاربرها به 127.0.0.1، شبکه‌ی داخلی و پنل‌های روی سرور نمی‌رسند، حتی با دامنه‌ای که به آن‌ها اشاره کند."),
+    d.private_direct ? null : h("label", { class: "field" }, h("span", {}, "استثنا (هر خط یکی)"),
+      h("textarea", { rows: 2, dir: "ltr", spellcheck: "false", placeholder: "10.0.0.5\n192.168.1.0/24",
+        oninput: (ev) => { d.allow_private = ev.target.value.split("\n").map((s) => s.trim()).filter(Boolean); d.dirty = true; drawSaveBar(); } })));
+  const ta = $("textarea", priv);
+  if (ta) ta.value = d.allow_private.join("\n");
+
+  return h("div", {},
+    head("روتینگ", "مثل بخش Routing Rules در 3x-ui، ولی داخل NeoExit: قانون‌ها از بالا به پایین؛ اولی که بخورد تصمیم می‌گیرد."),
+    h("p", { class: "note warn" }, icon("spark"), h("span", {}, "در 3x-ui برای همه‌ی اینباندها ", h("b", {}, "Sniffing را روشن"), " کنید (HTTP، TLS، QUIC) و ", ltr("routeOnly"), " را خاموش بگذارید تا دامنه‌ها به NeoExit برسند. اگر برنامه‌ای فقط IP بفرستد، NeoExit خودش اسم سایت را از اول اتصال پیدا می‌کند، ولی Sniffing دقیق‌تر است.")),
+    h("div", { id: "rt-save" }),
+    h("section", { class: "card" },
+      h("div", { class: "card-head" }, h("h2", { class: "card-title" }, "قانون‌ها"),
+        h("div", { class: "actions-inline" },
+          h("button", { class: "pill", type: "button", onclick: openPresets }, icon("plus"), "دسته‌های آماده"),
+          h("button", { class: "pill dark", type: "button", onclick: () => openRule(-1) }, icon("plus"), "قانون تازه"))),
+      h("div", { class: "rt-wrap" }, table)),
+    h("div", { class: "grid2", style: "margin-top:14px" },
+      h("div", { class: "stack" },
+        h("section", { class: "card" }, h("h2", { class: "card-title" }, "امتحان کن"), testerCard()),
+        h("section", { class: "card" }, h("h2", { class: "card-title" }, "آدرس‌های داخلی سرور"), priv)),
+      h("section", { class: "card" }, h("h2", { class: "card-title" }, "DNS"), dnsCard())));
+}
+
+function drawSaveBar() {
+  const slot = $("#rt-save");
+  if (!slot) return;
+  const d = rtDraft();
+  fill(slot, d.dirty ? h("div", { class: "savebar" },
+    h("span", {}, "تغییرات ذخیره نشده‌اند."),
+    h("button", { class: "pill ghost", type: "button", onclick: () => { RT = null; render(true); } }, "برگرداندن"),
+    h("button", { class: "pill dark", type: "button", onclick: (ev) => act(ev.currentTarget, async () => {
+      await api("PUT", "routing", { rules: d.rules, other: d.other, private_direct: d.private_direct, allow_private: d.allow_private });
+      RT = null;
+    }, "روتینگ ذخیره شد") }, "ذخیره")) : null);
+}
+
+// The rule sheet, with the fields 3x-ui has.
+function openRule(i) {
+  const d = rtDraft();
+  const r = i >= 0 ? d.rules[i] : { target: "direct" };
+  const dlg = $("#rule-dialog");
+  const list = (v) => (v || []).join(",\n");
+  const ta = (name, label, val, ph, hint) => h("label", { class: "field" }, h("span", {}, label),
+    h("textarea", { name, rows: 3, dir: "ltr", spellcheck: "false", placeholder: ph }, val), hint ? h("small", { class: "muted" }, hint) : null);
+  const proxies = [{ id: "main", name: "پروکسی اصلی" }, ...(S.extra_proxies || [])];
+  const f = h("form", { class: "svc-edit" },
+    h("div", { class: "row2" },
+      h("label", { class: "field" }, h("span", {}, "اسم (اختیاری)"), h("input", { name: "name", dir: "auto", maxlength: 60, value: r.name || "" })),
+      h("label", { class: "field" }, h("span", {}, "خروجی (Outbound)"), targetSelect("target", r.target))),
+    ta("domains", "دامنه (Domain)", list(r.domains), "myip.ms,\next:hmray.dat:game-ea,\ngeosite:youtube,\ndomain:example.com",
+      "با ویرگول یا خط جدا. myip.ms (هر جای اسم)، domain:، full:، regexp:، geosite:، ext:hmray.dat:..."),
+    ta("ips", "IP", list(r.ips), "1.2.3.0/24,\ngeoip:ir,\next:hmray-geoip.dat:telegram", "IP، CIDR، geoip:، geoip:private، ext:"),
+    h("p", { class: "hint", style: "margin:0" }, "مثل 3x-ui: همه‌ی بخش‌های پرشده‌ی یک قانون باید با هم درست باشند. برای «این دامنه‌ها یا این IPها» دو قانون جدا بسازید."),
+    h("div", { class: "row2" },
+      h("label", { class: "field" }, h("span", {}, "پورت (Port)"), h("input", { name: "ports", dir: "ltr", placeholder: "443,1000-2000", value: r.ports || "" })),
+      h("label", { class: "field" }, h("span", {}, "شبکه (Network)"),
+        h("select", { name: "network" },
+          h("option", { value: "", selected: !r.network }, "TCP,UDP"),
+          h("option", { value: "tcp", selected: r.network === "tcp" }, "TCP"),
+          h("option", { value: "udp", selected: r.network === "udp" }, "UDP")))),
+    h("fieldset", { class: "field checks" }, h("legend", {}, "پروتکل (Protocol)"),
+      Object.entries(PROTO).map(([v, l]) => h("label", { class: "check" }, h("input", { type: "checkbox", name: "proto", value: v, checked: (r.protocols || []).includes(v) }), h("span", {}, l)))),
+    h("fieldset", { class: "field checks" }, h("legend", {}, "ورودی (Inbound، مثل inboundTag؛ هیچ = همه)"),
+      proxies.map((p) => h("label", { class: "check" }, h("input", { type: "checkbox", name: "inb", value: p.id, checked: (r.inbounds || []).includes(p.id) }), h("span", {}, p.name)))),
+    h("p", { class: "form-error", role: "alert" }),
+    h("div", { class: "actions" },
+      h("button", { class: "pill dark", type: "submit" }, i >= 0 ? "اعمال" : "افزودن"),
+      h("button", { class: "pill ghost", type: "button", "data-close": "" }, "انصراف"),
+      h("small", { class: "muted" }, "بعد «ذخیره» را در بالای صفحه بزنید.")));
+  f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const split = (s) => s.split(/[,\n،]/).map((x) => x.trim()).filter(Boolean);
+    const nr = { ...r, name: f.name.value.trim(), target: f.target.value, domains: split(f.domains.value), ips: split(f.ips.value),
+      ports: f.ports.value.trim(), network: f.network.value,
+      protocols: $$("[name=proto]:checked", f).map((x) => x.value), inbounds: $$("[name=inb]:checked", f).map((x) => x.value) };
+    if (!nr.domains.length && !nr.ips.length && !nr.ports && !nr.network && !nr.protocols.length && !nr.inbounds.length) {
+      $(".form-error", f).textContent = "دست‌کم یک شرط لازم است.";
+      return;
+    }
+    if (i >= 0) d.rules[i] = nr; else d.rules.push(nr);
+    dlg.close();
+    rtChanged();
+  });
+  fill($("#rule-body"),
+    h("div", { class: "sheet-head" }, h("h2", { id: "rule-dialog-title" }, i >= 0 ? "قانون " + fa(i + 1) : "قانون تازه"),
+      h("button", { class: "round small", type: "button", "data-close": "", "aria-label": "بستن" }, icon("close"))),
+    f);
+  if (!dlg.open) dlg.showModal();
+}
+
+// Ready rules from the HMray lists.
+function openPresets() {
+  const d = rtDraft();
+  const dlg = $("#rule-dialog");
+  dlg.addEventListener("close", () => { if (view === "routing") render(true); }, { once: true });
+  fill($("#rule-body"),
+    h("div", { class: "sheet-head" }, h("h2", { id: "rule-dialog-title" }, "دسته‌های آماده"),
+      h("button", { class: "round small", type: "button", "data-close": "", "aria-label": "بستن" }, icon("close"))),
+    h("p", { class: "hint" }, "هر کدام یک قانون می‌سازد که بعد قابل ویرایش است. مسدودها بالای جدول می‌روند، بقیه پایینش."),
+    h("div", { class: "stack" }, (S.presets || []).map((p) => {
+      const sel = targetSelect("", p.target || "direct");
+      return h("div", { class: "toggle-row" },
+        h("span", {}, h("b", {}, p.name), h("small", { class: "ltr", dir: "ltr" }, [...(p.domains || []), ...(p.ips || []), p.protocol ? "protocol:" + p.protocol : ""].filter(Boolean).join(", "))),
+        h("div", { class: "actions-inline" }, sel, h("button", { class: "pill", type: "button", onclick: () => {
+          // In one rule every condition must hold, so names and addresses
+          // go in separate rules (as 3x-ui needs too).
+          const add = [];
+          if ((p.domains || []).length) add.push({ name: p.name, domains: p.domains, target: sel.value });
+          if ((p.ips || []).length) add.push({ name: p.name + " (IP)", ips: p.ips, target: sel.value });
+          if (p.protocol) add.push({ name: p.name, protocols: [p.protocol], target: sel.value });
+          if (sel.value === "block") d.rules.unshift(...add); else d.rules.push(...add);
+          toast("«" + p.name + "» اضافه شد؛ ذخیره را بزنید");
+          d.dirty = true;
+        } }, "افزودن")));
+    })),
+    h("div", { class: "actions", style: "margin-top:1rem" }, h("button", { class: "pill dark", type: "button", onclick: () => { dlg.close(); render(true); } }, "تمام")));
+  if (!dlg.open) dlg.showModal();
+}
+
+// Where would this go? With unsaved edits, the edited table is tried.
+const rtT = { host: "", port: "", network: "tcp", proxy: "main" };
+function testerCard() {
+  const d = rtDraft();
+  const host = h("input", { dir: "ltr", placeholder: "chatgpt.com  ·  digikala.com  ·  1.2.3.4", value: rtT.host, "aria-label": "دامنه یا IP", oninput: (ev) => (rtT.host = ev.target.value) });
+  const port = h("input", { type: "number", min: 1, max: 65535, dir: "ltr", placeholder: "443", value: rtT.port, "aria-label": "پورت", oninput: (ev) => (rtT.port = ev.target.value) });
+  const net = h("select", { "aria-label": "شبکه", onchange: (ev) => (rtT.network = ev.target.value) },
+    h("option", { value: "tcp", selected: rtT.network === "tcp" }, "TCP"), h("option", { value: "udp", selected: rtT.network === "udp" }, "UDP"));
+  const prx = h("select", { "aria-label": "ورودی", onchange: (ev) => (rtT.proxy = ev.target.value) },
+    [{ id: "main", name: "پروکسی اصلی" }, ...(S.extra_proxies || [])].map((p) => h("option", { value: p.id, selected: rtT.proxy === p.id }, p.name)));
+  const out = h("div", { class: "test-out", "aria-live": "polite" });
+  const run = async () => {
+    fill(out, "…");
+    try {
+      const body = { host: host.value, port: Number(port.value) || 0, network: net.value, proxy: prx.value };
+      if (d.dirty) body.rules = d.rules;
+      const r = await api("POST", "routing/test", body);
+      const dd = r.decision, [kind, v] = dd.rule.split(":");
+      let why = { private: "آدرس داخلی سرور", exit: "این پروکسی روی یک خروجی است", default: "بقیه‌ی ترافیک" }[kind];
+      if (kind === "service") why = v === "ai" ? "سایت هوش مصنوعی" : "سرویس " + ((S.services.find((s) => s.id === v) || { name: v }).name);
+      if (kind === "rule") {
+        const n = d.rules.findIndex((x) => x.id === v);
+        why = "قانون " + (n >= 0 ? fa(n + 1) + (d.rules[n].name ? " (" + d.rules[n].name + ")" : "") : "");
+      }
+      fill(out, h("b", {}, why), " ← ", targetLabel(dd.target),
+        r.up === false ? h("small", { class: "bad" }, " این خروجی الان قطع است؛ اتصال برقرار نمی‌شود.") : null,
+        r.dns ? h("small", { class: "muted" }, r.dns === "ir" ? " · با DNS ایران resolve می‌شود" : " · با DNS معمول resolve می‌شود") : null,
+        d.dirty ? h("small", { class: "muted" }, " · با تغییرات ذخیره‌نشده") : null);
+    } catch (e) { fill(out, h("span", { class: "bad" }, e.message)); }
+  };
+  host.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); run(); } });
+  return h("div", { class: "stack", style: "margin-top:.8rem" },
+    host, h("div", { class: "row3" }, port, net, prx),
+    h("div", {}, h("button", { class: "pill dark", type: "button", onclick: run }, "امتحان کن")), out);
+}
+
+function dnsCard() {
+  const c = S.dns || {};
+  const f = h("form", { class: "stack", style: "margin-top:.8rem" },
+    h("div", { class: "toggle-row" }, h("span", {}, h("b", {}, "DNS ایران برای دامنه‌های ایرانی"),
+      h("small", {}, "دامنه‌های ایرانی (همه‌ی .ir و فهرست ایران HMray) با DNS داخل ایران resolve می‌شوند تا IP ایرانی بگیرند؛ بقیه با DNS معمول. اگر DNS ایران جواب ندهد، DNS معمول جایش را می‌گیرد. فقط برای ترافیکی که از خود سرور بیرون می‌رود.")),
+      h("label", { class: "switch" }, h("input", { type: "checkbox", name: "ir_on", checked: !c.ir_off, "aria-label": "DNS ایران" }), h("i"))),
+    h("label", { class: "field" }, h("span", {}, "DNSهای ایران (هر خط یکی)"),
+      h("textarea", { name: "ir_servers", rows: 3, dir: "ltr", spellcheck: "false", placeholder: (c.def_ir_servers || []).join("\n") })),
+    h("label", { class: "field" }, h("span", {}, "دامنه‌های ایرانی (مثل قانون‌ها)"),
+      h("textarea", { name: "ir_domains", rows: 2, dir: "ltr", spellcheck: "false", placeholder: (c.def_ir_domains || []).join("\n") })),
+    h("label", { class: "field" }, h("span", {}, "DNS معمول برای بقیه (خالی = DNS خود سرور)"),
+      h("textarea", { name: "servers", rows: 2, dir: "ltr", spellcheck: "false", placeholder: "1.1.1.1\n8.8.8.8" })),
+    h("div", {}, h("button", { class: "pill dark", type: "submit" }, "ذخیره‌ی DNS")));
+  f.ir_servers.value = (c.ir_servers || []).join("\n");
+  f.ir_domains.value = (c.ir_domains || []).join("\n");
+  f.servers.value = (c.servers || []).join("\n");
+  const lines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
+  f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    act(f.querySelector("[type=submit]"), () => api("PUT", "dns", {
+      ir_off: !f.ir_on.checked, ir_servers: lines(f.ir_servers.value), ir_domains: lines(f.ir_domains.value), servers: lines(f.servers.value),
+    }), "DNS ذخیره شد");
+  });
+  const q = h("input", { dir: "ltr", placeholder: "digikala.com", "aria-label": "دامنه برای امتحان DNS" });
+  const out = h("div", { class: "test-out", "aria-live": "polite" });
+  const run = async () => {
+    fill(out, "…");
+    try {
+      const r = await api("POST", "dns/test", { host: q.value });
+      fill(out, h("b", {}, r.via === "ir" ? "DNS ایران" : "DNS معمول"), " · ", fa(r.ms) + " میلی‌ثانیه · ", ltr(r.ips.slice(0, 3).join("  ")));
+    } catch (e) { fill(out, h("span", { class: "bad" }, e.message)); }
+  };
+  q.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); run(); } });
+  return h("div", {}, f, h("div", { class: "stack tester", style: "margin-top:1rem" },
+    h("b", {}, "امتحان DNS"), h("div", { class: "row2" }, q, h("button", { class: "pill", type: "button", onclick: run }, "resolve")), out));
 }
 
 /* ---------- whole Xray config, merged ---------- */
@@ -950,7 +1360,7 @@ function viewSettings() {
     h("div", { class: "toggle-row" }, h("span", {}, h("b", {}, "IP تازه‌ی خودکار برای WARP"),
       h("small", {}, "اگر هیچ خروجی‌ای برای یک سرویس جواب ندهد، WARP حساب تازه و IP تازه می‌گیرد.")), sw("auto_rotate", st.auto_rotate)),
     h("label", { class: "field" }, h("span", {}, "حداکثر IP تازه در ساعت"), h("input", { name: "rotate_hourly", type: "number", min: 1, max: 30, dir: "ltr", value: st.rotate_hourly })),
-    h("label", { class: "field" }, h("span", {}, "بقیه‌ی ترافیک (غیر از هوش مصنوعی) از کجا برود"),
+    h("label", { class: "field" }, h("span", {}, "بقیه‌ی ترافیک (همان ردیف آخر جدول روتینگ)"),
       h("select", { name: "other" }, h("option", { value: "" }, "مسیر عادی خود سرور"), S.exits.map((x) => h("option", { value: x.id, selected: st.other === x.id }, x.name)))),
     h("div", {}, h("button", { class: "pill dark", type: "submit" }, "ذخیره‌ی تنظیمات")));
   f.addEventListener("submit", (ev) => {

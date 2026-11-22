@@ -25,6 +25,7 @@ import (
 	"neoexit/internal/opera"
 	"neoexit/internal/proxy"
 	"neoexit/internal/psiphon"
+	"neoexit/internal/routing"
 	"neoexit/internal/update"
 )
 
@@ -38,7 +39,11 @@ type App struct {
 	Version string
 	// RestartProxy re-opens the proxy after its address changed.
 	RestartProxy func() error
-	Updater      *update.Updater
+	// Extras are the extra proxy ports; RestartExtras opens them again
+	// from the settings.
+	Extras        *proxy.Group
+	RestartExtras func() error
+	Updater       *update.Updater
 
 	failMu sync.Mutex
 	fails  map[string][]time.Time
@@ -86,6 +91,13 @@ func (a *App) panelAPI(panel bool) *http.ServeMux {
 	api.HandleFunc("DELETE /api/services/{id}", a.deleteService)
 	api.HandleFunc("PUT /api/settings", a.settings)
 	api.HandleFunc("PUT /api/proxy", a.editProxy)
+	api.HandleFunc("POST /api/proxies", a.addExtra)
+	api.HandleFunc("PUT /api/proxies/{id}", a.editExtra)
+	api.HandleFunc("DELETE /api/proxies/{id}", a.deleteExtra)
+	api.HandleFunc("PUT /api/routing", a.putRouting)
+	api.HandleFunc("POST /api/routing/test", a.testRouting)
+	api.HandleFunc("PUT /api/dns", a.putDNS)
+	api.HandleFunc("POST /api/dns/test", a.testDNS)
 	if panel {
 		api.HandleFunc("PUT /api/password", a.password)
 		api.HandleFunc("POST /api/spot/open", a.spotOpen)
@@ -218,23 +230,38 @@ type stateView struct {
 	Exits    []exitView       `json:"exits"`
 	Services []config.Service `json:"services"`
 	Proxy    config.Proxy     `json:"proxy"`
-	Settings settingsView     `json:"settings"`
-	User     string           `json:"user"`
-	Live     engine.Snapshot  `json:"live"`
-	Conns    int64            `json:"conns"`
-	Host     HostInfo         `json:"host"`
-	Snippet  map[string]any   `json:"snippet"`
-	Choices  Choices          `json:"choices"`
-	Update   update.Status    `json:"update"`
-	Routing  routingView      `json:"routing"`
+	Extra    []extraView      `json:"extra_proxies"`
+	// Stats: proxy ID ("main" or an extra's) -> rule -> counts since start.
+	Stats map[string]engine.Counter `json:"stats"`
+	// The routing table and what goes with it.
+	Rules         []config.Rule    `json:"rules"`
+	Presets       []routing.Preset `json:"presets"`
+	PrivateDirect bool             `json:"private_direct"`
+	DNS           dnsView          `json:"dns"`
+	Settings      settingsView     `json:"settings"`
+	User          string           `json:"user"`
+	Live          engine.Snapshot  `json:"live"`
+	Conns         int64            `json:"conns"`
+	Host          HostInfo         `json:"host"`
+	Snippet       map[string]any   `json:"snippet"`
+	Choices       Choices          `json:"choices"`
+	Update        update.Status    `json:"update"`
+	Routing       routingView      `json:"routing"`
+}
+
+type dnsView struct {
+	config.DNS
+	DefIRServers []string `json:"def_ir_servers"`
+	DefIRDomains []string `json:"def_ir_domains"`
 }
 
 type settingsView struct {
-	CheckMinutes int    `json:"check_minutes"`
-	SameCountry  bool   `json:"same_country"`
-	AutoRotate   bool   `json:"auto_rotate"`
-	RotateHourly int    `json:"rotate_hourly"`
-	Other        string `json:"other"`
+	CheckMinutes int      `json:"check_minutes"`
+	SameCountry  bool     `json:"same_country"`
+	AutoRotate   bool     `json:"auto_rotate"`
+	RotateHourly int      `json:"rotate_hourly"`
+	Other        string   `json:"other"`
+	AllowPrivate []string `json:"allow_private"`
 }
 
 func (a *App) state(w http.ResponseWriter, r *http.Request) {
@@ -248,11 +275,19 @@ func (a *App) state(w http.ResponseWriter, r *http.Request) {
 		Conns:    a.Proxy.Active.Load(),
 		Host:     Host(),
 		Snippet:  Snippet(cfg),
-		Settings: settingsView{cfg.CheckMinutes, cfg.SameCountry, cfg.AutoRotate, cfg.RotateHourly, cfg.Other},
+		Settings: settingsView{cfg.CheckMinutes, cfg.SameCountry, cfg.AutoRotate, cfg.RotateHourly, cfg.Other, cfg.AllowPrivate},
 		Choices:  Choices{Opera: opera.Regions, Psiphon: psiphon.Countries},
 		Update:   a.updateStatus(),
 		Routing:  a.routingState(cfg),
 	}
+	v.Extra = a.extraViews(cfg)
+	v.Stats = a.Engine.Stats()
+	v.Rules = cfg.Routing
+	if v.Rules == nil {
+		v.Rules = []config.Rule{}
+	}
+	v.Presets, v.PrivateDirect = routing.Presets, cfg.PrivateDirect
+	v.DNS = dnsView{DNS: cfg.DNS, DefIRServers: config.DefaultIRServers, DefIRDomains: config.DefaultIRDomains}
 	for _, x := range cfg.Exits {
 		ev := exitView{ID: x.ID, Kind: x.Kind, Name: x.Name, Enabled: x.Enabled, Address: x.Address, User: x.User,
 			HasPass: x.Pass != "", License: x.License != "", Region: x.Region, HasKey: x.Key != ""}
@@ -407,6 +442,9 @@ func (a *App) editExit(w http.ResponseWriter, r *http.Request) {
 func (a *App) deleteExit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	err := a.Store.Update(func(c *config.Config) error {
+		if who := c.UsesExit(id); who != "" {
+			return fmt.Errorf("%s ترافیک به این خروجی می‌فرستد؛ اول آن را عوض کنید", who)
+		}
 		c.Exits = slices.DeleteFunc(c.Exits, func(x config.Exit) bool { return x.ID == id })
 		for i := range c.Services {
 			if c.Services[i].Pin == id {
@@ -579,12 +617,16 @@ func (a *App) settings(w http.ResponseWriter, r *http.Request) {
 		if in.RotateHourly > 0 {
 			c.RotateHourly = in.RotateHourly
 		}
+		if in.AllowPrivate != nil {
+			c.AllowPrivate = trimList(in.AllowPrivate)
+		}
 		return nil
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	ApplyNet(a.Store.Get())
 	a.Engine.Reload()
 	writeJSON(w, map[string]bool{"ok": true})
 }
@@ -600,6 +642,7 @@ func (a *App) editProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	old := a.Store.Get().Proxy
+	in.Exit = old.Exit // changed with PUT api/proxies/main
 	err := a.Store.Update(func(c *config.Config) error {
 		c.Proxy = in
 		return nil

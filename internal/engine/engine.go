@@ -7,6 +7,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"neoexit/internal/check"
@@ -64,10 +66,16 @@ type Engine struct {
 	running   bool
 
 	kick chan struct{}
+
+	statsMu sync.Mutex
+	stats   map[string]*Counter // rule or "target:<id>" -> counts
+
+	table atomic.Pointer[Table] // the routing table in use
 }
 
 func New(store *config.Store, dir string) *Engine {
 	e := &Engine{
+		stats:    map[string]*Counter{},
 		store:    store,
 		dir:      dir,
 		probes:   check.LoadProbes(filepath.Join(dir, "probes.json")),
@@ -79,6 +87,7 @@ func New(store *config.Store, dir string) *Engine {
 		kick:     make(chan struct{}, 1),
 	}
 	e.load()
+	e.SetRouting()
 	return e
 }
 
@@ -602,33 +611,31 @@ func (e *Engine) rotate(ctx context.Context, id, why string) error {
 	return nil
 }
 
-// Route returns the dialer for a host: the exit of the service the host
-// belongs to, or the exit for other traffic (nil = the server's own route).
-func (e *Engine) Route(host string) (exit.Dialer, string) {
-	cfg := e.store.Get()
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// serviceExitLocked is the exit for a host of an AI service: the one the
+// engine chose for it, or else the first that is up.
+func (e *Engine) serviceExitLocked(cfg config.Config, host string) (exitID, svc string, ok bool) {
 	for _, s := range cfg.Services {
 		if !s.Enabled || !matches(host, s.Domains) {
 			continue
 		}
 		if st := e.services[s.ID]; st != nil && e.dialers[st.Exit] != nil {
-			return e.dialers[st.Exit], s.ID
+			return st.Exit, s.ID, true
 		}
 		for _, x := range cfg.Exits {
-			if d := e.dialers[x.ID]; d != nil {
-				return d, s.ID
+			if e.dialers[x.ID] != nil {
+				return x.ID, s.ID, true
 			}
 		}
 	}
-	if cfg.Other != "" {
-		if d := e.dialers[cfg.Other]; d != nil {
-			return d, ""
-		}
-	}
-	return nil, ""
+	return "", "", false
 }
+
+type downDialer struct{}
+
+func (downDialer) DialContext(context.Context, string, string) (net.Conn, error) {
+	return nil, errors.New("this proxy's exit is down")
+}
+func (downDialer) Close() error { return nil }
 
 func matches(host string, domains []string) bool {
 	for _, d := range domains {

@@ -195,8 +195,11 @@ func run(dir, cfgPath string, plain bool, sock string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := web.ApplyNet(store.Get()); err != nil {
+		log.Printf("Iranian DNS off: %v", err)
+	}
 	eng := engine.New(store, dir)
-	px := &proxy.Server{Route: eng.Route}
+	px := &proxy.Server{ID: "main", Route: eng.Route, Sniff: eng.Sniff, Count: eng.Count}
 	var pmu sync.Mutex
 	restartProxy := func() error {
 		pmu.Lock()
@@ -209,10 +212,23 @@ func run(dir, cfgPath string, plain bool, sock string) {
 	if err := restartProxy(); err != nil {
 		log.Fatalf("proxy: %v", err)
 	}
+	// The extra ports; one that can't open doesn't stop the service.
+	extras := &proxy.Group{}
+	restartExtras := func() error {
+		var specs []proxy.Spec
+		for _, x := range store.Get().Extra {
+			specs = append(specs, proxy.Spec{ID: x.ID, Addr: net.JoinHostPort(x.Listen, strconv.Itoa(x.Port)), User: x.User, Pass: x.Pass,
+				Route: eng.Route, Sniff: eng.Sniff, Count: eng.Count})
+		}
+		return extras.Set(specs)
+	}
+	if err := restartExtras(); err != nil {
+		log.Printf("extra proxies: %v", err)
+	}
 	// After an update, ending the service makes systemd start the new binary.
 	upd := &update.Updater{Current: version, Restart: stop}
 	upd.Start()
-	app := &web.App{Store: store, Engine: eng, Proxy: px, Version: version, RestartProxy: restartProxy, Updater: upd}
+	app := &web.App{Store: store, Engine: eng, Proxy: px, Version: version, RestartProxy: restartProxy, Extras: extras, RestartExtras: restartExtras, Updater: upd}
 
 	cfg := store.Get()
 	srv := &http.Server{
@@ -249,6 +265,7 @@ func run(dir, cfgPath string, plain bool, sock string) {
 	defer cancel()
 	srv.Shutdown(sctx)
 	px.Close()
+	extras.Close()
 }
 
 func status(sock string) {
